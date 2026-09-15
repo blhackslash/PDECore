@@ -18,17 +18,6 @@ jobs:
         with:
           version: '1.12' 
           
-      - uses: https://github.com/actions/cache@v3
-        with:
-          path: |
-            ~/.julia/artifacts
-            ~/.julia/packages
-            ~/.julia/registries
-            ~/.julia/compiled
-          key: ${{ runner.os }}-julia-${{ hashFiles('**/Project.toml', '**/Manifest.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-julia-
-          
       - uses: https://github.com/julia-actions/julia-buildpkg@v1
         with:
           ignore-no-cache: true
