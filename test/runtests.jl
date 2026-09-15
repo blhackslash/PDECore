@@ -72,7 +72,7 @@ mock_ref_func(st) = SVector{1, Float64}(1.0)
             @test all(v -> v[1] ≈ 0.0, loaded_data.stats[:l1error])
 
             # 3. Check Custom Stat Registration
-            PDECore.register_stat!(:mock_custom_stat, :time)
+            add_stat!(loaded_data, :mock_custom_stat, 42.0, :time)
             @test get_kept_dims(:mock_custom_stat, loaded_data.domain) == [:t]
         end
     end
