@@ -6,15 +6,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    
+    # THE FIX: Force Julia to use Git for registry downloads to bypass MTU/HTTP stalls
+    env:
+      JULIA_PKG_SERVER: ""
+      
     steps:
       - uses: actions/checkout@v3
       
-      # 1. Install Julia
       - uses: https://github.com/julia-actions/setup-julia@v1
         with:
-          version: '1.9' # Update this to your target Julia version
+          version: '1.12' 
           
-      # 2. Cache the Julia Packages natively!
       - uses: https://github.com/actions/cache@v3
         with:
           path: |
@@ -26,6 +29,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-julia-
           
-      # 3. Build and Test
       - uses: https://github.com/julia-actions/julia-buildpkg@v1
+        with:
+          ignore-no-cache: true
+          
       - uses: https://github.com/julia-actions/julia-runtest@v1
