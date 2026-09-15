@@ -8,8 +8,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: julia-actions/setup-julia@v1
+      
+      # Use the full github.com URL for external community actions!
+      - uses: https://github.com/julia-actions/setup-julia@v1
         with:
-          version: '1.12' # Or whichever version you developed on
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+          version: '1.12' # Or your target version
+          
+      - uses: https://github.com/julia-actions/julia-buildpkg@v1
+      - uses: https://github.com/julia-actions/julia-runtest@v1
