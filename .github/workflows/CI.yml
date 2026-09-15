@@ -12,10 +12,19 @@ jobs:
       # 1. Install Julia
       - uses: https://github.com/julia-actions/setup-julia@v1
         with:
-          version: '1.12' # Update this to your target Julia version
+          version: '1.9' # Update this to your target Julia version
           
-      # 2. Cache the Registry, Artifacts, and Precompiled Binaries
-      - uses: https://github.com/julia-actions/cache@v1
+      # 2. Cache the Julia Packages natively!
+      - uses: https://github.com/actions/cache@v3
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/packages
+            ~/.julia/registries
+            ~/.julia/compiled
+          key: ${{ runner.os }}-julia-${{ hashFiles('**/Project.toml', '**/Manifest.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-julia-
           
       # 3. Build and Test
       - uses: https://github.com/julia-actions/julia-buildpkg@v1
