@@ -14,13 +14,13 @@ jobs:
     env:
       JULIA_PKG_SERVER: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: https://github.com/actions/checkout@v4
       - name: Set up Julia
-        uses: julia-actions/setup-julia@v2
+        uses: https://github.com/julia-actions/setup-julia@v2
         with:
           version: '1.12'
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+      - uses: https://github.com/julia-actions/julia-buildpkg@v1
+      - uses: https://github.com/julia-actions/julia-runtest@v1
 
   docs:
     name: Documentation
@@ -31,10 +31,10 @@ jobs:
     env:
       JULIA_PKG_SERVER: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: https://github.com/actions/checkout@v4
 
       - name: Set up Julia
-        uses: julia-actions/setup-julia@v2
+        uses: https://github.com/julia-actions/setup-julia@v2
         with:
           version: '1.12'
 
@@ -47,9 +47,3 @@ jobs:
 
       - name: Build Documentation
         run: julia --project=docs docs/make.jl
-
-      - name: Upload HTML as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: documentation-html
-          path: docs/build
