@@ -11,8 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: node:20-bookworm
-      volumes:
-        - /data/appdata/forgejo-runner/julia-depot:/root/.julia
     env:
       JULIA_PKG_SERVER: ""
     steps:
@@ -30,8 +28,6 @@ jobs:
     needs: test
     container:
       image: node:20-bookworm
-      volumes:
-        - /data/appdata/forgejo-runner/julia-depot:/root/.julia
     env:
       JULIA_PKG_SERVER: ""
     steps:
