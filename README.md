@@ -4,7 +4,7 @@
 
 Designed with reproducible academic research in mind, it provides a unified framework for generating strictly typed, precision-agnostic Eulerian and Lagrangian datasets. It features deterministic cryptographic hashing for simulation parameters, automated disk caching, and a highly optimized multithreaded statistical integration pipeline. 
 
-> **Note:** This package serves exclusively as the numerical and data-management backend. For interactive Makie-based visualization and UI controls, pair this package with its sister frontend, **PDEStudio.jl**.
+> **Note:** This package serves exclusively as the headless numerical and data-management engine. For interactive Makie-based visualization and UI controls, use its graphical frontend package: **PDEStudio.jl**.
 
 ---
 

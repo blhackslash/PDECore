@@ -49,7 +49,7 @@ julia> set_stat_preset!("hyperbolic")
 ```
 """
 function set_stat_preset!(name::String)
-    preset_path = joinpath(@__DIR__, "presets", "$name.jl")
+    preset_path = joinpath(@__DIR__, "../presets", "$name.jl")
     if isfile(preset_path)
         # Evaluates the preset file inside the PDECore module namespace
         Base.include(@__MODULE__, preset_path)
@@ -102,8 +102,30 @@ julia> register_stat!(:l2_error, :time)
 ```
 """
 function register_stat!(name::Symbol, kept_dims::Union{Symbol, Vector{Symbol}})
-    STAT_REGISTRY[name][] = kept_dims
+    _ACTIVE_STAT_REGISTRY[][name] = kept_dims
     @info "Registered statistic :$name keeping dimensions: $kept_dims"
+end
+
+"""
+    get_kept_dims(stat::Symbol, domain::DomainInfo)
+
+Translates generic aliases (:all, :space, :time) into exact dimension symbols 
+using the domain's local registry and specific time_dim.
+"""
+function get_kept_dims(stat::Symbol, domain::DomainInfo)
+    reg_val = get(domain.stat_registry, stat, Symbol[])
+    
+    if reg_val === :all
+        return collect(domain.dim_keys)
+    elseif reg_val === :space
+        return filter(d -> d !== domain.time_dim, collect(domain.dim_keys))
+    elseif reg_val === :time
+        return isnothing(domain.time_dim) ? Symbol[] : [domain.time_dim]
+    elseif reg_val isa Vector{Symbol}
+        return reg_val
+    else
+        return Symbol[]
+    end
 end
 
 # --- THE NEW TRANSLATOR HELPER ---
