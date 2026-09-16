@@ -4,12 +4,173 @@ using StaticArrays
 using LinearAlgebra
 using Polyester # For @batch
 
-include("StatFunctions.jl")
+# ==============================================================================
+# --- Central Plugin Registry (Dimension-Based) ---
+# ==============================================================================
+
+# The active, mutable global registry template (starts completely empty)
+const _ACTIVE_STAT_REGISTRY = Ref{Dict{Symbol, Union{Symbol, Vector{Symbol}}}}(Dict())
+
+"""
+    get_stat_registry()
+
+Retrieves the currently active global statistic registry template.
+"""
+get_stat_registry() = _ACTIVE_STAT_REGISTRY[]
+
+"""
+    set_stat_registry!(new_registry::Dict{Symbol, Union{Symbol, Vector{Symbol}}})
+
+Completely overwrites the active global statistic registry with a new dictionary. 
+"""
+function set_stat_registry!(new_registry::Dict{Symbol, Union{Symbol, Vector{Symbol}}})
+    _ACTIVE_STAT_REGISTRY[] = deepcopy(new_registry)
+    @info "Global statistic registry has been overwritten."
+end
+
+"""
+    reset_stat_registry!()
+
+Clears the global statistic registry entirely.
+"""
+function reset_stat_registry!()
+    empty!(_ACTIVE_STAT_REGISTRY[])
+    @info "Global statistic registry has been cleared."
+end
+
+"""
+    set_stat_preset!(name::String)
+
+Dynamically loads a predefined set of statistics and their `calc_stat` overloads from the `src/presets/` directory.
+
+# Examples
+```julia-repl
+julia> set_stat_preset!("hyperbolic")
+```
+"""
+function set_stat_preset!(name::String)
+    preset_path = joinpath(@__DIR__, "presets", "$name.jl")
+    if isfile(preset_path)
+        # Evaluates the preset file inside the PDECore module namespace
+        Base.include(@__MODULE__, preset_path)
+        @info "Successfully loaded stat preset: $name"
+    else
+        @error "Preset file not found: $preset_path"
+    end
+end
+
+"""
+    add_stat!(sim_data::AbstractSimData, name::Symbol, value, kept_dims::Union{Symbol, Vector{Symbol}})
+
+Appends a fully custom, pre-calculated statistic directly to a simulation dataset. 
+Registers the dimensions it keeps so the Plotter UI knows exactly how to slice and display it.
+
+# Arguments
+- `sim_data::AbstractSimData`: The Eulerian or Lagrangian data to attach the statistic to.
+- `name::Symbol`: The identifier for the custom statistic.
+- `value`: The computed statistical array or scalar.
+- `kept_dims::Union{Symbol, Vector{Symbol}}`: The dimensions this array spans.
+"""
+function add_stat!(sim_data::AbstractSimData{D, DS, M, T}, name::Symbol, value, kept_dims::Union{Symbol, Vector{Symbol}}) where {D, DS, M, T}
+    value_vec = value isa Real ? SVector{M, T}([T(value) for _ in 1:M]) : value
+    sim_data.stats[name] = value_vec
+    sim_data.domain.stat_registry[name] = kept_dims
+    @info "Added custom stat '$name' keeping dimensions: $kept_dims"
+end
+
+# Ultimate Fallback (Safely returns an SVector of NaNs matching the component count)
+"""
+    calc_stat(stat, fixed_coords, u, ana, domain)
+
+The ultimate fallback dispatcher for statistical calculations. 
+If a custom statistic is evaluated without a specific typed overload, this safely returns an `SVector` of `NaN`s matching the field component count.
+"""
+calc_stat(stat, fixed_coords, u, ana, domain) = zero(eltype(u)) .* NaN
+
+"""
+    register_stat!(name::Symbol, kept_dims::Symbol)
+
+Registers a custom statistic into the global registry and defines which dimensions should be retained during integration.
+
+# Arguments
+- `name::Symbol`: The unique identifier for your custom statistic.
+- `kept_dims::Symbol`: The dimensions to retain. Valid aliases are `:all`, `:space`, or `:time`.
+
+# Examples
+```julia-repl
+julia> register_stat!(:l2_error, :time)
+```
+"""
+function register_stat!(name::Symbol, kept_dims::Union{Symbol, Vector{Symbol}})
+    STAT_REGISTRY[name][] = kept_dims
+    @info "Registered statistic :$name keeping dimensions: $kept_dims"
+end
+
+# --- THE NEW TRANSLATOR HELPER ---
+"""
+    get_kept_indices(stat::Symbol, domain::DomainInfo)
+
+Maps the retained dimension symbols for a given statistic to their corresponding numerical indices within the domain's coordinate axes.
+
+# Arguments
+- `stat::Symbol`: The registered name of the statistic.
+- `domain::DomainInfo`: The bounding box metadata of the simulation run.
+
+# Returns
+- `Vector{Int}`: A sorted list of dimension indices.
+"""
+function get_kept_indices(stat::Symbol, domain::DomainInfo)
+    kept_dims = get_kept_dims(stat, domain)
+    
+    indices = Int[]
+    for dim in kept_dims
+        idx = findfirst(==(dim), domain.dim_keys)
+        if !isnothing(idx)
+            push!(indices, idx)
+        end
+    end
+    
+    return sort(indices)
+end
+
+"""
+    get_integration_measure(stat::Symbol, domain::DomainInfo{D}) where {D}
+
+Computes the combined scalar volumetric integration measure (e.g., dx * dy * dt) for the dimensions that are being integrated out for a specific statistic. 
+Dimensions that are retained do not contribute to this measure.
+
+# Arguments
+- `stat::Symbol`: The registered name of the statistic.
+- `domain::DomainInfo`: The domain containing the uniform spacing metadata.
+
+# Returns
+- A floating-point scalar representing the combined spacing measure.
+"""
+function get_integration_measure(stat::Symbol, domain::DomainInfo{D}) where {D}
+    kept_dims = get_kept_dims(stat, domain)
+    measure = 1.0
+    for d in 1:D
+        if !(domain.dim_keys[d] in kept_dims)
+            measure *= domain.spacing[d]
+        end
+    end
+    return measure
+end
 
 # ==============================================================================
 # --- MAIN PIPELINE (Entry Points) ---
 # ==============================================================================
 
+"""
+    remove_nan_stats!(stats_dict::StatDict)
+
+Iterates over a statistical dictionary and removes any registered statistic where 
+every value evaluates to `NaN`. This typically occurs when a statistic requiring an 
+analytical reference solution is evaluated without one provided.
+
+# Arguments
+- `stats_dict::StatDict`: The dictionary of computed statistics attached to a simulation object.
+"""
 function remove_nan_stats!(stats_dict::StatDict)
     keys_to_remove = Symbol[]
     for (name, val) in stats_dict
@@ -21,6 +182,19 @@ function remove_nan_stats!(stats_dict::StatDict)
     
     for k in keys_to_remove; delete!(stats_dict, k); end
 end
+"""
+    is_all_nan(val)
+
+A recursive helper function to accurately detect if an entire array structure evaluates to `NaN`. 
+Safely handles Eulerian multidimensional arrays, flat scalar `SVector`s, and nested Lagrangian 
+particle series.
+
+# Arguments
+- `val`: The array or vector to evaluate.
+
+# Returns
+- `Bool`: `true` if every element in the nested structure is `NaN`.
+"""
 function is_all_nan(val)
     # Handle Nested Lagrangian Fields
     if val isa Vector{<:Vector} 
@@ -36,6 +210,22 @@ function is_all_nan(val)
     end
 end
 
+"""
+    calculate_all_stats!(sim_data::AbstractSimData, ref_func; force_overwrite = false, kwargs...)
+
+The core statistical integration engine. Evaluates all metrics currently registered in the 
+simulation's `stat_registry` across the provided mathematical dataset. 
+
+If a `ref_func` (analytical truth) is provided, it generates a pointwise perfect cache mapping 
+over the exact spatial layout of the data before executing multithreaded reductions. 
+
+# Arguments
+- `sim_data::AbstractSimData`: The loaded simulation object to analyze.
+- `ref_func::Function`: The continuous mathematical reference function (can be `nothing`).
+
+# Keyword Arguments
+- `force_overwrite::Bool`: Re-evaluates and overwrites metrics already present in `sim_data.stats`. Default is `false`.
+"""
 function calculate_all_stats!(sim_data::AbstractSimData, ref_func; force_overwrite = false, kwargs...)
     # 1. Generate full analytical field upfront (NaNs or exact)
     u_ana = isnothing(ref_func) ? generate_pointwise_nan(sim_data) : generate_pointwise_reference(sim_data, ref_func)
@@ -72,7 +262,22 @@ end
 # ==============================================================================
 # --- EULERIAN STATISTICAL REDUCTIONS ---
 # ==============================================================================
+"""
+    _calc_stat!(sim_data::ESimData, u_ana, stat_name::Symbol)
+    _calc_stat!(sim_data::LSimData, u_ana, stat_name::Symbol)
 
+Internal backend dispatch for executing statistical reductions. It slices the dense Eulerian tensor 
+or Lagrangian series along the correct retained dimensions, and uses Polyester `@batch` multithreading 
+to integrate out the ignored axes efficiently.
+
+# Arguments
+- `sim_data`: The Eulerian or Lagrangian data.
+- `u_ana`: The pre-calculated pointwise analytical array (or array of NaNs).
+- `stat_name::Symbol`: The registered name of the statistic to calculate.
+
+# Returns
+- The integrated statistical array mapping exactly to the retained dimensions.
+"""
 function _calc_stat!(sim_data::ESimData{D, DS, M, T}, u_ana, stat_name::Symbol) where {D, DS, M, T}
     kept_idx = get_kept_indices(stat_name, sim_data.domain)
     
@@ -132,7 +337,20 @@ end
 # ==============================================================================
 # --- ANALYTICAL CACHE GENERATOR ---
 # ==============================================================================
+"""
+    generate_pointwise_nan(data::LSimData)
+    generate_pointwise_nan(data::ESimData)
 
+Generates an exact structural replica of the simulation's field array (`u`), filled entirely 
+with `NaN`s. This allows the statistical pipeline to maintain type stability and run seamlessly 
+even when an analytical reference function is missing.
+
+# Arguments
+- `data`: The Eulerian or Lagrangian simulation data.
+
+# Returns
+- An array mirroring `data.u` containing `SVector{M, T}(NaN, NaN...)`.
+"""
 function generate_pointwise_nan(data::LSimData{D, DS, M, T}) where {D, DS, M, T}
     return [fill(SVector{M, T}(ntuple(_ -> T(NaN), M)), length(x)) for x in data.x]
 end
@@ -141,6 +359,21 @@ function generate_pointwise_nan(data::ESimData{D, DS, M, T}) where {D, DS, M, T}
     return fill(SVector{M, T}(ntuple(_ -> T(NaN), M)), size(data.u))
 end
 
+"""
+    generate_pointwise_reference(data::LSimData, ref_func)
+    generate_pointwise_reference(data::ESimData, ref_func)
+
+Generates a precise pointwise cache of the exact analytical truth by evaluating the continuous 
+`ref_func` at the exact spatial and temporal coordinates of every grid node or Lagrangian particle.
+Uses Polyester `@batch` for highly efficient multithreaded evaluation.
+
+# Arguments
+- `data`: The simulation data providing the coordinate targets.
+- `ref_func::Function`: The continuous mathematical function returning an `SVector{M, T}`.
+
+# Returns
+- An array mirroring `data.u` populated with the exact analytical values.
+"""
 function generate_pointwise_reference(ldata::LSimData{D, DS, M, T}, ref_func) where {D, DS, M, T}
     Nt = length(ldata.t)
     u_ana = Vector{Vector{SVector{M, T}}}(undef, Nt)
@@ -180,8 +413,16 @@ calculate_all_stats!(::NoSimData, kwargs...) = return
 """
     calculate_all_stats!(sim_config::SimulationConfig; kwargs...)
 
-Batch calculates statistics for all simulations defined in a `SimulationConfig`.
-Executes sequentially to avoid I/O bottlenecks and allow internal mathematical threading.
+Batch calculates statistics for all simulations defined within a `SimulationConfig`. 
+It executes sequentially at the file-I/O level to prevent disk bottlenecks, allowing the 
+internal mathematical reductions to fully utilize hardware threading.
+
+# Arguments
+- `sim_config::SimulationConfig`: The orchestration blueprint containing the sweeps and reference function.
+
+# Keyword Arguments
+- `varied_params::VariedDict`: Can override the `sim_config`'s sweep parameters.
+- `fixed_params::ParamDict`: Additional fixed parameters to inject into the sweep.
 """
 function calculate_all_stats!(
     sim_config::SimulationConfig;

@@ -1,25 +1,59 @@
 name: CI
+
 on:
   push:
-    branches: [main, master]
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
+
 jobs:
   test:
-    runs-on: ubuntu-latest
-    
-    # THE FIX: Force Julia to use Git for registry downloads to bypass MTU/HTTP stalls
+    runs-on: docker
+    container:
+      image: node:20-bookworm
+      volumes:
+        - /data/appdata/forgejo-runner/julia-depot:/root/.julia
     env:
       JULIA_PKG_SERVER: ""
-      
     steps:
-      - uses: actions/checkout@v3
-      
-      - uses: https://github.com/julia-actions/setup-julia@v1
+      - uses: actions/checkout@v4
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v2
         with:
-          version: '1.12' 
-          
-      - uses: https://github.com/julia-actions/julia-buildpkg@v1
+          version: '1.12'
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+
+  docs:
+    name: Documentation
+    runs-on: docker
+    needs: test
+    container:
+      image: node:20-bookworm
+      volumes:
+        - /data/appdata/forgejo-runner/julia-depot:/root/.julia
+    env:
+      JULIA_PKG_SERVER: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v2
         with:
-          ignore-no-cache: true
-          
-      - uses: https://github.com/julia-actions/julia-runtest@v1
+          version: '1.12'
+
+      - name: Install documentation dependencies
+        run: |
+          julia --project=docs -e '
+            using Pkg
+            Pkg.develop(PackageSpec(path=pwd()))
+            Pkg.instantiate()'
+
+      - name: Build Documentation
+        run: julia --project=docs docs/make.jl
+
+      - name: Upload HTML as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-html
+          path: docs/build

@@ -1,3 +1,15 @@
+"""
+    is_reference_method(m_name::Symbol)
+
+Determines if a given method symbol designates an analytical or baseline reference solution. 
+It checks if the method name contains keywords such as "analytic", "reference", "exact", "baseline", or "true".
+
+# Arguments
+- `m_name::Symbol`: The method identifier to evaluate.
+
+# Returns
+- `Bool`: `true` if the method is a reference method, `false` otherwise.
+"""
 function is_reference_method(m_name::Symbol)
     lm = lowercase(String(m_name))
     return any(k -> occursin(k, lm), ["analytic", "reference", "exact", "baseline", "true"])
@@ -6,9 +18,19 @@ end
 """
     run_smart_simulation(sim_func::Function, params::ParamDict; force_overwrite::Bool=false)
 
-Smart wrapper for single simulations. Checks if `SimData` already exists on disk.
-If it does (and `force_overwrite` is false), it skips execution and returns `NoSimData`.
-Otherwise, it executes the simulation, saves the result, and returns the data.
+A smart execution wrapper for individual simulation runs. It checks the disk cache for an existing 
+dataset matching the exact cryptographic hash of the parameters. If found, it safely bypasses 
+execution to conserve compute resources.
+
+# Arguments
+- `sim_func::Function`: The core simulation function to execute.
+- `params::ParamDict`: The strictly typed dictionary of parameters for this run.
+
+# Keyword Arguments
+- `force_overwrite::Bool`: If `true`, forces the simulation to execute and overwrites any existing cache. Default is `false`.
+
+# Returns
+- `AbstractSimData`: The resulting simulation data, or `NoSimData` if execution was bypassed.
 """
 function run_smart_simulation(sim_func::Function, params::ParamDict; force_overwrite::Bool=false)
     if !force_overwrite && does_sim_data_exist(params)
@@ -25,10 +47,22 @@ function run_smart_simulation(sim_func::Function, params::ParamDict; force_overw
 end
 
 """
-    generate_method_tasks(base_params, active_keys, active_values; ignore_keys=Symbol[])
+    generate_method_tasks(base_params::ParamDict, active_keys::Vector{Symbol}, active_values::Vector; ignore_keys::Vector{Symbol}=Symbol[])
 
-Generates the parameter grid for a simulation sweep. Dynamically reconstructs 
-dimensional identifiers (e.g., Ns__x, Ns__1) back into their base Tuple (e.g., Ns = (val1, val2)).
+Generates the comprehensive parameter grid for a multi-dimensional simulation sweep. 
+It dynamically parses dimensional identifiers (e.g., `:Ns__x`, `:Ns__1`) and reconstructs them 
+back into their base `Tuple` format (e.g., `:Ns => (val1, val2)`) across the Cartesian product of the sweep.
+
+# Arguments
+- `base_params::ParamDict`: The baseline parameters for the current method.
+- `active_keys::Vector{Symbol}`: The parameter keys being varied in the sweep.
+- `active_values::Vector`: The corresponding vectors of values to sweep over.
+
+# Keyword Arguments
+- `ignore_keys::Vector{Symbol}`: Keys that should be entirely excluded from this specific method's generation.
+
+# Returns
+- `Tuple{Vector{ParamDict}, Vector{Tuple}}`: A tuple containing the list of flat task dictionaries and their Cartesian grid indices.
 """
 function generate_method_tasks(base_params::ParamDict, active_keys::Vector{Symbol}, active_values::Vector; ignore_keys::Vector{Symbol}=Symbol[])
     
@@ -112,7 +146,14 @@ end
 """
     get_ignore_keys(method_collection::MethodDict, method_name::Symbol)
 
-Safely extracts the list of keys a specific method wishes to ignore.
+Safely extracts the list of keys a specific numerical method is configured to ignore during parameter assembly.
+
+# Arguments
+- `method_collection::MethodDict`: The dictionary containing all method overrides.
+- `method_name::Symbol`: The specific method being queried.
+
+# Returns
+- `Vector{Symbol}`: A list of keys to ignore.
 """
 function get_ignore_keys(method_collection::MethodDict, method_name::Symbol)
     method_dict = get(method_collection, method_name, ParamDict())
@@ -130,8 +171,17 @@ end
 """
     assemble_params(shared_params::ParamDict, method_collection::MethodDict, method_name::Symbol)
 
-Backend version: Constructs a flat parameter dictionary for a simulation run by combining
-shared parameters and method-specific parameters.
+Constructs a flat, unified parameter dictionary for a specific simulation run by combining 
+shared baseline parameters with method-specific overrides. Automatically filters out any keys 
+flagged for ignoring by the specific method.
+
+# Arguments
+- `shared_params::ParamDict`: The baseline parameters shared across all runs.
+- `method_collection::MethodDict`: The dictionary containing method-specific overrides.
+- `method_name::Symbol`: The active method being assembled.
+
+# Returns
+- `ParamDict`: The fully resolved parameter dictionary for the run.
 """
 function assemble_params(
     shared_params::ParamDict,
@@ -170,8 +220,19 @@ end
 """
     run_all_simulations(sim_config::SimulationConfig; kwargs...)
 
-Executes all simulations defined in a `SimulationConfig`. 
-Perfect for headless execution without UI overhead.
+The primary execution engine for the package. Evaluates the `SimulationConfig`, resolves parameter sweeps, 
+manages disk caching, and coordinates statistical evaluation and custom post-processing. 
+
+Designed for robust, headless execution on computing clusters.
+
+# Arguments
+- `sim_config::SimulationConfig`: The orchestration blueprint defining the full pipeline.
+
+# Keyword Arguments
+- `force_overwrite::Bool`: If `true`, bypasses cache checks and forces re-execution of all tasks. Default is `false`.
+- `calculate_stats::Bool`: If `true`, automatically integrates statistical metrics (e.g., L2 errors) after generation. Default is `false`.
+- `post_process::Bool`: If `true`, executes the custom user-defined post-processing routine. Default is `true`.
+- `parallel::Bool`: If `true`, dispatches simulation tasks across available Julia threads. Default is `false`.
 """
 function run_all_simulations(
     sim_config::SimulationConfig;
@@ -233,7 +294,7 @@ function run_all_simulations(
         counter2 = Threads.Atomic{Int}(0)
         
         # Standard required stats (ignores derived stats and :Solution)
-        standard_req_stats = filter(k -> k !== :Solution, collect(keys(STAT_REGISTRY)))
+        standard_req_stats = filter(k -> k !== :Solution, collect(keys(_ACTIVE_STAT_REGISTRY[])))
         
         for params in all_tasks
             # --- FAST METADATA CHECK ---
@@ -300,6 +361,22 @@ end
 # --- REFERENCE GENERATORS ---
 # ==============================================================================
 
+"""
+    generate_reference_simdata(ref_func, params, template_domain, res, ::Val{:eulerian})
+
+Generates a pointwise perfect exact analytical reference dataset mapped onto a dense Eulerian grid. 
+Utilizes multithreading for fast tensor allocation and evaluation across the D-dimensional domain.
+
+# Arguments
+- `ref_func::Function`: The analytical reference function to evaluate.
+- `params::ParamDict`: The parameter dictionary of the associated numerical run.
+- `template_domain::DomainInfo`: The bounding box and metadata of the numerical run.
+- `res::NTuple{D, Int}`: The requested spacetime grid resolution.
+- `::Val{:eulerian}`: Strict type token for Eulerian generation.
+
+# Returns
+- `ESimData`: The generated Eulerian reference dataset.
+"""
 function generate_reference_simdata(
     ref_func::Function, 
     params::ParamDict, 
@@ -338,6 +415,21 @@ function generate_reference_simdata(
     
     return ram_data
 end
+"""
+    generate_reference_simdata(ref_func, params, template_domain, res, ::Val{:lagrangian})
+
+Generates an exact analytical reference dataset mapped onto a static, structured grid of Lagrangian particles across time.
+
+# Arguments
+- `ref_func::Function`: The analytical reference function to evaluate.
+- `params::ParamDict`: The parameter dictionary of the associated numerical run.
+- `template_domain::DomainInfo`: The bounding box and metadata of the numerical run.
+- `res::NTuple{D, Int}`: The requested spacetime grid resolution.
+- `::Val{:lagrangian}`: Strict type token for Lagrangian generation.
+
+# Returns
+- `LSimData`: The generated Lagrangian reference dataset.
+"""
 function generate_reference_simdata(
     ref_func::Function, 
     params::ParamDict, 

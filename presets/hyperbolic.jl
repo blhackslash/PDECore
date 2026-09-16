@@ -1,108 +1,17 @@
-# ==============================================================================
-# --- Central Plugin Registry (Dimension-Based) ---
-# ==============================================================================
-
-const STAT_REGISTRY = Dict{Symbol, Union{Symbol, Vector{Symbol}}}(
-    :mass          => :time,
-    :l1norm        => :time,
-    :l2norm        => :time,
-    :wave_height   => :time,
-    :l1error       => :time,
-    :l2error       => :time,
-    :relative_l2error => :time,
-    :relative_l1error => :time,
-    :relative_mass => :time,
-    :spacetime_relative_mass => Symbol[],
-    :mass_error    => :time,
-    :mass_signed_error => :time,
-    :wave_position => :time,
-    # Examples of your new D-agnostic aliases:
-    # :u_squared   => :all,      (Field: keeps everything)
-    # :mass_profile => :space,   (Profile: keeps space, integrates time)
-)
-
-function register_stat!(name::Symbol, kept_dims::Union{Symbol, Vector{Symbol}})
-    STAT_REGISTRY[name] = kept_dims
-    @info "Registered statistic :$name keeping dimensions: $kept_dims"
-end
-
-# --- THE NEW TRANSLATOR HELPER ---
-"""
-    get_kept_dims(stat::Symbol, domain::DomainInfo)
-
-Translates generic aliases (:all, :space, :time) into exact dimension symbols 
-using the domain's local registry and specific time_dim.
-"""
-function get_kept_dims(stat::Symbol, domain::DomainInfo)
-    reg_val = get(domain.stat_registry, stat, Symbol[])
-    
-    if reg_val === :all
-        return collect(domain.dim_keys)
-    elseif reg_val === :space
-        return filter(d -> d !== domain.time_dim, collect(domain.dim_keys))
-    elseif reg_val === :time
-        return isnothing(domain.time_dim) ? Symbol[] : [domain.time_dim]
-    elseif reg_val isa Vector{Symbol}
-        return reg_val
-    else
-        return Symbol[]
-    end
-end
-
-function get_kept_indices(stat::Symbol, domain::DomainInfo)
-    kept_dims = get_kept_dims(stat, domain)
-    
-    indices = Int[]
-    for dim in kept_dims
-        idx = findfirst(==(dim), domain.dim_keys)
-        if !isnothing(idx)
-            push!(indices, idx)
-        end
-    end
-    
-    return sort(indices)
-end
-
-function get_integration_measure(stat::Symbol, domain::DomainInfo{D}) where {D}
-    kept_dims = get_kept_dims(stat, domain)
-    measure = 1.0
-    for d in 1:D
-        if !(domain.dim_keys[d] in kept_dims)
-            measure *= domain.spacing[d]
-        end
-    end
-    return measure
-end
-
-function delete_stat!(name::Symbol)
-    try
-        delete!(STAT_REGISTRY, name)
-        @info "Deleted statistic :$name"
-    catch
-        @warn "Could not find statistic :$name to delete!"
-    end
-end
-
-"""
-    add_stat!(sim_data::AbstractSimData, name::Union{String, Symbol}, value, kept_dims::Union{Symbol, Vector{Symbol}})
-
-Appends a fully custom statistic to a simulation dataset. 
-Registers the dimensions it keeps so the Plotter UI knows exactly how to slice and display it.
-"""
-function add_stat!(sim_data::AbstractSimData{D, DS, M, T}, name::Symbol, value, kept_dims::Union{Symbol, Vector{Symbol}}) where {D, DS, M, T}
-    value_vec = value isa Real ? SVector{M, T}([T(value) for _ in 1:M]) : value
-    sim_data.stats[name] = value_vec
-    sim_data.domain.stat_registry[name] = kept_dims
-    @info "Added custom stat '$name' keeping dimensions: $kept_dims"
-end
-
-# ==============================================================================
-# --- DISPATCH ROUTERS & FALLBACKS ---
-# ==============================================================================
-
-# Ultimate Fallback (Safely returns an SVector of NaNs matching the component count)
-calc_stat(stat, fixed_coords, u, ana, domain) = zero(eltype(u)) .* NaN 
-
+# 1. Register the metrics into the active registry
+register_stat!(:mass, :time)
+register_stat!(:l1norm, :time)
+register_stat!(:l2norm, :time)
+register_stat!(:wave_height, :time)
+register_stat!(:l1error, :time)
+register_stat!(:l2error, :time)
+register_stat!(:relative_l2error, :time)
+register_stat!(:relative_l1error, :time)
+register_stat!(:relative_mass, :time)
+register_stat!(:spacetime_relative_mass, Symbol[])
+register_stat!(:mass_error, :time)
+register_stat!(:mass_signed_error, :time)
+register_stat!(:wave_position, :time)
 
 # ==============================================================================
 # --- STANDARD METRICS ---

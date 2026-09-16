@@ -1,3 +1,10 @@
+"""
+    PDECore
+
+A robust, headless-safe backend for the execution, management, and statistical analysis of Partial Differential Equation (PDE) simulations.
+
+Provides a unified framework for generating strictly typed Eulerian (`ESimData`) and Lagrangian (`LSimData`) datasets, deterministic parameter hashing, automated disk caching, and a multithreaded statistical integration pipeline.
+"""
 module PDECore
 
 # --- 1. Headless-Safe Dependencies ---
@@ -14,6 +21,7 @@ export create_param_dict, create_method_dict, create_varied_dict, create_sim_dat
 # Globals & Settings
 export set_save_path!, set_target_module!, get_save_path, get_target_module, enable_cache!
 export register_stat!, delete_stat!, add_stat!, get_kept_dims, get_kept_indices
+export get_stat_registry, set_stat_registry!, reset_stat_registry!, set_stat_preset!
 # Simulation & Data Pipeline
 export run_all_simulations, load_sim_data, save_sim_data, generate_method_tasks
 export does_sim_data_exist, delete_sim_data, rehash_sim_data, calculate_hash, print_clean_params
@@ -34,6 +42,12 @@ include("Simulations.jl")         # run_smart_simulation, runAllSimulations
 
 
 # Custom REPL print for Lagrangian Data
+"""
+    Base.show(io::IO, ::MIME"text/plain", data::LSimData)
+
+Overrides the default REPL display for `LSimData` objects. 
+Provides a neatly formatted summary of the Lagrangian dataset, including the temporal range, spatial domain boundaries, particle count dynamics, and currently evaluated statistics.
+"""
 function Base.show(io::IO, ::MIME"text/plain", data::LSimData{D, DS, M, T}) where {D, DS, M, T}
     println(io, "🟢 LSimData{$D, $DS, $M, $T} (Lagrangian Simulation Data)")
     println(io, "==================================================")
@@ -77,6 +91,12 @@ end
 
 
 # Custom REPL print for Eulerian Data
+"""
+    Base.show(io::IO, ::MIME"text/plain", data::ESimData)
+
+Overrides the default REPL display for `ESimData` objects. 
+Provides a neatly formatted summary of the Eulerian dataset, including the temporal range, spatial domain boundaries, static grid resolution, and currently evaluated statistics.
+"""
 function Base.show(io::IO, ::MIME"text/plain", data::ESimData{D, DS, M, T}) where {D, DS, M, T}
     println(io, "🟦 ESimData{$D, $DS, $M, $T} (Eulerian Grid Data)")
     println(io, "==================================================")

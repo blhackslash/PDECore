@@ -1,4 +1,15 @@
 
+"""
+    _get_lsim_bounds(x::Vector{Vector{SVector{DS, T}}}) where {DS, T}
+
+An internal helper function that scans the entire Lagrangian particle history to determine the absolute minimum and maximum spatial coordinates across all time steps.
+
+# Arguments
+- `x::Vector{Vector{SVector{DS, T}}}`: The nested vectors containing particle coordinates over time.
+
+# Returns
+- A tuple of `(mins, maxs)`, where each is a `Tuple` of bounds for the spatial dimensions.
+"""
 function _get_lsim_bounds(x::Vector{Vector{SVector{DS, T}}}) where {DS, T}
     mins, maxs = fill(T(Inf), DS), fill(T(-Inf), DS)
     for step in x; for p in step; for d in 1:DS
@@ -12,8 +23,28 @@ end
 # ==============================================================================
 
 # 1D Space + 1D Time = 2D Spacetime Tensor
+"""
+    create_sim_data(x, u, t, params; kwargs...)
+
+Constructs an Eulerian simulation dataset for a 1D spatial domain and 1D temporal domain (yielding a 2D spacetime tensor). 
+Automatically calculates uniform grid spacing, initializes a bounding `DomainInfo`, and registers the primary solution in the stats dictionary.
+
+# Arguments
+- `x::AbstractVector{<:Real}`: The 1D spatial coordinate vector.
+- `u::AbstractMatrix{SVector{M, T}}`: The 2D spacetime field data.
+- `t::AbstractVector{<:Real}`: The discrete time vector.
+- `params::ParamDict`: The parameters used to generate this data.
+
+# Keyword Arguments
+- `xmins`, `xmaxs`, `tmin`, `tmax`: Manual overrides for the domain bounding box.
+- `time_dim::Union{Nothing,Symbol}`: The identifier for the temporal axis (defaults to `:t`).
+- `x_dim::Symbol`: The identifier for the spatial axis (defaults to `:x`).
+
+# Returns
+- `ESimData`: The strictly typed Eulerian dataset.
+"""
 function create_sim_data(
-    x::AbstractVector{<:Real}, u::AbstractMatrix{SVector{M, T}}, t::AbstractVector{<:Real}, params::ParamDict; 
+    x::AbstractVector{<:Real}, u::AbstractMatrix{SVector{M, T}}, t::AbstractVector{<:Real}, params::ParamDict;
     xmins=nothing, xmaxs=nothing, tmin=nothing, tmax=nothing, time_dim::Union{Nothing,Symbol}=:t, x_dim::Symbol=:x
 ) where {M, T<:Real}
     DS, D = 1, 2
@@ -33,7 +64,7 @@ function create_sim_data(
         length(t) > 1 ? (_maxs[2] - _mins[2]) / T(length(t) - 1) : one(T)
     )
     
-    registry = deepcopy(STAT_REGISTRY)
+    registry = deepcopy(_ACTIVE_STAT_REGISTRY[])
     registry[:Solution] = :all
     
     dim_keys = (x_dim, time_dim)
@@ -46,8 +77,23 @@ function create_sim_data(
 end
 
 # 2D Space + 1D Time = 3D Spacetime Tensor
+"""
+    create_sim_data(x_grid, y_grid, u, t, params; kwargs...)
+
+Constructs an Eulerian simulation dataset for a 2D spatial domain and 1D temporal domain (yielding a 3D spacetime tensor). Extracts the base 1D axes from the provided 2D grid matrices.
+
+# Arguments
+- `x_grid::AbstractMatrix{<:Real}`: The 2D matrix of x-coordinates.
+- `y_grid::AbstractMatrix{<:Real}`: The 2D matrix of y-coordinates.
+- `u::AbstractArray{SVector{M, T}, 3}`: The 3D spacetime field data.
+- `t::AbstractVector{<:Real}`: The discrete time vector.
+- `params::ParamDict`: The parameters used to generate this data.
+
+# Returns
+- `ESimData`: The strictly typed Eulerian dataset representing 2D spatial fields over time.
+"""
 function create_sim_data(
-    x_grid::AbstractMatrix{<:Real}, y_grid::AbstractMatrix{<:Real}, u::AbstractArray{SVector{M, T}, 3}, t::AbstractVector{<:Real}, params::ParamDict; 
+    x_grid::AbstractMatrix{<:Real}, y_grid::AbstractMatrix{<:Real}, u::AbstractArray{SVector{M, T}, 3}, t::AbstractVector{<:Real}, params::ParamDict;
     xmins=nothing, xmaxs=nothing, tmin=nothing, tmax=nothing, time_dim::Union{Nothing,Symbol}=:t, x_dim::Symbol=:x,y_dim::Symbol=:y
 ) where {M, T<:Real}
     DS, D = 2, 3
@@ -72,7 +118,7 @@ function create_sim_data(
         length(t) > 1 ? (_maxs[3] - _mins[3]) / T(length(t) - 1) : one(T)
     )
     
-    registry = deepcopy(STAT_REGISTRY)
+    registry = deepcopy(_ACTIVE_STAT_REGISTRY[])
     registry[:Solution] = :all
     
     dim_keys = (x_dim, y_dim, time_dim)
@@ -87,7 +133,20 @@ end
 # ==============================================================================
 # --- LAGRANGIAN CONSTRUCTORS ---
 # ==============================================================================
+"""
+    create_sim_data(x, u, t, params; kwargs...)
 
+Constructs a Lagrangian simulation dataset. If spatial bounds are not explicitly provided, it automatically determines them by scanning the particle coordinate vectors. It also computes an average equivalent spatial resolution (`avg_dx`) based on the particle count and domain volume.
+
+# Arguments
+- `x::Vector{Vector{SVector{DS, T}}}`: Nested vectors of particle spatial coordinates per time step.
+- `u::Vector{Vector{SVector{M, T}}}`: Nested vectors of particle state vectors per time step.
+- `t::Vector{T}`: The discrete time vector.
+- `params::ParamDict`: The configuration parameters.
+
+# Returns
+- `LSimData`: The strictly typed Lagrangian dataset.
+"""
 function create_sim_data(
     x::Vector{Vector{SVector{DS, T}}}, u::Vector{Vector{SVector{M, T}}}, t::Vector{T}, params::ParamDict;
     xmins=nothing, xmaxs=nothing, tmin=nothing, tmax=nothing, time_dim::Union{Nothing,Symbol}=:t
@@ -110,7 +169,7 @@ function create_sim_data(
     maxs = SVector{D, T}(_xmaxs..., _tmax)
     spacing = SVector{D, T}(ntuple(d -> avg_dx, Val(DS))..., dt)
     
-    registry = deepcopy(STAT_REGISTRY)
+    registry = deepcopy(_ACTIVE_STAT_REGISTRY[])
     registry[:Solution] = :all
     domain = DomainInfo{D, T}(dim_keys, mins, maxs, spacing, time_dim, registry)
     stats_dict = StatDict{M, T}(:Solution => u)
@@ -119,12 +178,35 @@ function create_sim_data(
 end
 
 
+"""
+    get_time_dim(domain::DomainInfo)
+
+Retrieves the numerical index of the temporal dimension within the domain's sequence of dimension keys.
+
+# Arguments
+- `domain::DomainInfo`: The bounding box metadata of the simulation run.
+
+# Returns
+- An integer index, or `nothing` if the dataset represents static, purely spatial data.
+"""
 get_time_dim(domain::DomainInfo) = findfirst(==(domain.time_dim), domain.dim_keys)
 
 # ==============================================================================
 # --- CONVERSIONS ---
 # ==============================================================================
 # --- ALGORITHM: DYNAMIC SCATTER ---
+"""
+    interpolate_to_grid!(::Val{:scatter}, u_euler, w_euler, e_fields_tup, ldata, field_vals_tup, nan_vec, s_mins, s_maxs, s_dx, s_inv_dx, grid_shape)
+
+An internal multithreaded algorithm that scatters Lagrangian particles and their associated statistical fields onto a structured Eulerian grid. 
+It utilizes a distance-based weighting mechanism defined by a calculated effective smoothing radius, preventing zero-division via clamped minimum distances.
+
+# Arguments
+- `u_euler`: The preallocated target grid for the primary solution.
+- `w_euler`: The preallocated weight accumulator grid.
+- `e_fields_tup`: A tuple of preallocated target grids for registered statistical fields.
+- `ldata::LSimData`: The source Lagrangian dataset.
+"""
 function interpolate_to_grid!(
     ::Val{:scatter},
     u_euler, w_euler, e_fields_tup,
@@ -230,10 +312,15 @@ end
 """
     resample_eulerian(data::ESimData, res::NTuple{D, Int})
 
-Resamples the full Eulerian spacetime tensor and all dimensionally-dependent 
-statistics to a new resolution. Uses Linear interpolation for spatial dimensions 
-and Constant (Nearest-Neighbor) interpolation for the time dimension to prevent 
-cross-fading artifacts on low-resolution temporal data.
+Resamples the full Eulerian spacetime tensor, as well as all dimensionally-dependent custom statistics, to a new specified grid resolution. 
+Crucially, it utilizes linear interpolation for spatial dimensions and constant (nearest-neighbor) interpolation for the time dimension, which prevents artifacting and cross-fading on temporal data.
+
+# Arguments
+- `data::ESimData`: The original Eulerian dataset to be resampled.
+- `res::NTuple{D, Int}`: The exact target spacetime resolution (e.g., `(100, 100, 50)`).
+
+# Returns
+- `ESimData`: The newly interpolated Eulerian dataset, wrapped with updated `DomainInfo` and spacing.
 """
 function resample_eulerian(data::ESimData{D, DS, M, T}, res::NTuple{D, Int}) where {D, DS, M, T}
     # 1. Fast exit if resolutions already match perfectly
@@ -315,6 +402,22 @@ end
 # --- CONVERSIONS ---
 # ==============================================================================
 
+"""
+    convert_to_eulerian(ldata::LSimData, res::NTuple{D, Int}; spatial_interp=:scatter)
+
+Translates scattered Lagrangian particle data into a structured Eulerian tensor at a specified resolution. 
+It maps all relevant statistical fields using the scatter algorithm, handles coordinate normalization, and conditionally routes the output through a temporal resampling pass if the target time frames differ from the native data.
+
+# Arguments
+- `ldata::LSimData`: The native Lagrangian dataset.
+- `res::NTuple{D, Int}`: The requested spacetime grid resolution.
+
+# Keyword Arguments
+- `spatial_interp::Symbol`: The interpolation algorithm to use (defaults to `:scatter`).
+
+# Returns
+- `ESimData`: The synthesized Eulerian dataset.
+"""
 function convert_to_eulerian(
     ldata::LSimData{D, DS, M, T}, 
     res::NTuple{D, Int}; 
@@ -395,6 +498,18 @@ function convert_to_eulerian(
     return needs_time_resampling ? resample_eulerian(edata, res) : edata
 end
 
+"""
+    convert_to_lagrangian(data::ESimData)
+
+Translates a dense Eulerian grid into static, structured Lagrangian particles across time. 
+It achieves this by flattening the spatial meshgrid into 1D particle arrays and dynamically reshaping the multidimensional tensor slices to map onto these points at every time step.
+
+# Arguments
+- `data::ESimData`: The native Eulerian dataset.
+
+# Returns
+- `LSimData`: The synthesized Lagrangian dataset representing the grid as stationary particles.
+"""
 function convert_to_lagrangian(data::ESimData{D, DS, M, T}) where {D, DS, M, T}
     t_dim = get_time_dim(data.domain)
     is_static = isnothing(t_dim)

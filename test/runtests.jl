@@ -27,6 +27,7 @@ end
 mock_ref_func(st) = SVector{1, Float64}(1.0)
 
 @testset "PDECore.jl Integration Tests" begin
+    set_stat_preset!("hyperbolic")
     tmp_dir = mktempdir()
     set_save_path!(tmp_dir)
 
