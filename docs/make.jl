@@ -7,7 +7,7 @@ makedocs(
     checkdocs = :exports,
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", "false") == "true",
-        canonical = "https://blhackslash.github.io/PDECore.jl/",
+        canonical = "https://blhackslash.github.io/PDECore/",
         assets = String[],
     ),
     pages = [
@@ -20,7 +20,7 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/blhackslash/PDECore.jl.git",
+    repo = "github.com/blhackslash/PDECore.git",
     devbranch = "main",
     push_preview = true,
 )
