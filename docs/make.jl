@@ -1,17 +1,14 @@
-# docs/make.jl
 using Documenter
 using PDECore
 
 makedocs(
     sitename = "PDECore.jl",
     modules = [PDECore],
-    remotes = nothing,
-    checkdocs = :exports, # Tell Documenter to ignore unlisted private functions
+    checkdocs = :exports,
     format = Documenter.HTML(
-        # Set this if you link between pages without '.html'
-        prettyurls = true,
-        # Informs Documenter that the site lives under /PDECore/
-        canonical = "https://docs.blackslash.win/PDECore/"
+        prettyurls = get(ENV, "CI", "false") == "true",
+        canonical = "https://blhackslash.github.io/PDECore.jl/",
+        assets = String[],
     ),
     pages = [
         "Home" => "index.md",
@@ -19,5 +16,11 @@ makedocs(
         "Advanced Config" => "advanced_config.md",
         "Statistics" => "statistics.md",
         "API Reference" => "api.md",
-    ]
+    ],
+)
+
+deploydocs(
+    repo = "github.com/blhackslash/PDECore.jl.git",
+    devbranch = "main",
+    push_preview = true,
 )
