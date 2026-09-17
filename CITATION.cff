@@ -1,8 +1,10 @@
-@software{PDECore_2026,
-  author  = {Jung, Pascal},
-  title   = {PDECore.jl: High-Performance Numerical Backend for PDE Simulations},
-  url     = {https://github.com/blhackslash/PDECore.jl},
-  version = {0.1.0},
-  year    = {2026},
-  month   = {9}
-}
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "Jung"
+    given-names: "Pascal"
+    email: "dev@blackslash.win"
+title: "PDECore.jl: High-Performance Numerical Backend for PDE Simulations"
+version: 0.1.0
+date-released: 2026-09-17
+url: "https://github.com/blhackslash/PDECore.jl"
