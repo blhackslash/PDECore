@@ -364,4 +364,48 @@ end
         @test length(sim_L.stats[:pointwise_diff][1]) == 10 # 10 particles per step
         @test all(diff -> isapprox(diff[1], 0.0, atol=1e-12), sim_L.stats[:pointwise_diff][1])
     end
+
+    @testset "Output Formatting & Manual Loading" begin
+        # 1. Setup specific datasets for output testing
+        params_E = create_param_dict(:N => 25, :scheme => "upwind", :cfl => 0.5, :test_id => "format_E")
+        sim_E = advection_solver_1d(params_E)
+        save_sim_data(sim_E; overwrite=true)
+
+        params_L = create_param_dict(:N => 10, :v => 1.5, :test_id => "format_L")
+        sim_L = particle_solver_1d(params_L)
+        
+        @testset "REPL Display Output (Base.show)" begin
+            # Test ESimData text/plain formatting
+            out_E = repr("text/plain", sim_E)
+            @test occursin("ESimData", out_E)
+            @test occursin("Time (T)", out_E)
+            @test occursin("Space", out_E)
+            @test occursin("Grid Size", out_E)
+            @test occursin("Parameters", out_E)
+            @test occursin("Statistics", out_E)
+
+            # Test LSimData text/plain formatting
+            out_L = repr("text/plain", sim_L)
+            @test occursin("LSimData", out_L)
+            @test occursin("Time (T)", out_L)
+            @test occursin("Space", out_L)
+            @test occursin("Particles", out_L)
+            @test occursin("Parameters", out_L)
+            @test occursin("Statistics", out_L)
+        end
+
+        @testset "Manual SimData Loading by Hash" begin
+            # Extract a partial hash signature
+            full_hash = calculate_hash(params_E)
+            partial_hash = full_hash[1:8] 
+
+            # Attempt to load using just the string prefix
+            manual_sim = load_sim_data(partial_hash)["raw"]
+            @test manual_sim isa ESimData
+            @test manual_sim.params[:test_id] == "format_E"
+
+            # Verify that providing a bad hash properly throws the custom exception
+            @test_throws PDEStudioCore.SimFileNotFoundError load_sim_data("00000000000000000")
+        end
+    end
 end
