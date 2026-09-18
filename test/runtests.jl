@@ -490,6 +490,51 @@ end
         @test all(diff -> isapprox(diff[1], 0.0, atol=1e-12), sim_L.stats[:pointwise_diff][1])
     end
 
+    @testset "Serialization Primitives (val2str & str2val)" begin
+        # 1. Base primitives & edge cases
+        @test val2str("") == "<empty>"
+        @test str2val("<empty>") == ""
+        @test str2val("") == ""
+
+        @test val2str(42) == "42"
+        @test str2val("42") === 42
+
+        @test val2str(3.14) == "3.14"
+        @test str2val("3.14") === 3.14
+
+        @test val2str(:sample_sym) == ":sample_sym"
+        @test str2val(":sample_sym") === :sample_sym
+
+        @test val2str(Float64) == "Float64"
+        @test str2val("Float64") === Float64
+
+        # 2. String representation handling (top_level vs nested)
+        @test val2str("plain_str"; top_level=true) == "plain_str"
+        @test val2str("nested_str"; top_level=false) == "\"nested_str\""
+        @test str2val("\"nested_str\"") == "nested_str"
+
+        # 3. Containers (Vectors, Tuples, Dicts)
+        v = [1, 2, 3]
+        @test str2val(val2str(v)) == v
+
+        tup = (10, "nested", :val)
+        @test str2val(val2str(tup)) == tup
+
+        single_tup = (5,)
+        @test val2str(single_tup) == "(5,)"
+        @test str2val(val2str(single_tup)) == single_tup
+
+        d = Dict(:a => 1, :b => [10, 20])
+        parsed_d = str2val(val2str(d))
+        @test parsed_d isa Dict
+        @test parsed_d[:a] == 1
+        @test parsed_d[:b] == [10, 20]
+
+        # 4. Closures & custom fallbacks
+        @test val2str(x -> x + 1) == "Closure"
+        @test str2val("raw_unparsed_string") == "raw_unparsed_string"
+    end
+
     @testset "Output Formatting & Manual Loading" begin
         # 1. Setup specific datasets for output testing
         params_E = create_param_dict(:N => 25, :scheme => "upwind", :cfl => 0.5, :test_id => "format_E")
@@ -499,6 +544,27 @@ end
         params_L = create_param_dict(:N => 10, :v => 1.5, :test_id => "format_L")
         sim_L = particle_solver_1d(params_L)
         
+        @testset "Clean Parameter Processing & Printing" begin
+            # Test get_clean_params from Dict and AbstractSimData
+            clean_from_dict = PDEStudioCore.get_clean_params(params_E)
+            clean_from_sim = PDEStudioCore.get_clean_params(sim_E)
+            @test clean_from_dict isa Dict{Symbol, Any}
+            @test clean_from_dict == clean_from_sim
+            @test clean_from_dict[:test_id] == "format_E"
+
+            # Test print_clean_params outputs to stdout correctly
+            io_buf = IOBuffer()
+            printed_dict = redirect_stdout(io_buf) do
+                PDEStudioCore.print_clean_params(sim_E)
+            end
+            out_str = String(take!(io_buf))
+
+            @test printed_dict == clean_from_dict
+            @test occursin("Cleaned Parameters", out_str)
+            @test occursin("test_id => format_E", out_str)
+            @test occursin("scheme => upwind", out_str)
+        end
+
         @testset "REPL Display Output (Base.show)" begin
             # Test ESimData text/plain formatting
             out_E = repr("text/plain", sim_E)
@@ -522,7 +588,7 @@ end
         @testset "Manual SimData Loading by Hash" begin
             # Extract a partial hash signature
             full_hash = calculate_hash(params_E)
-            partial_hash = full_hash[1:8] 
+            partial_hash = full_hash[1:8]
 
             # Attempt to load using just the string prefix
             manual_sim = load_sim_data(partial_hash)["raw"]
