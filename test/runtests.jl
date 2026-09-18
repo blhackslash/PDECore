@@ -103,6 +103,14 @@ function PDEStudioCore.calc_stat(::Val{:pointwise_diff}, fixed_coords, u, ana, d
     return u[1] - ana[1]
 end
 
+
+function dummy_tuple_solver(params::ParamDict)
+    Nx, Ny = params[:Ns]
+    x = collect(range(0.0, 1.0, length=Nx))
+    t = [0.0, 0.1]
+    u = fill(SVector{1, Float64}(1.0), Nx, length(t))
+    return create_sim_data(x, u, t, params; time_dim=:t)
+end
 # ==============================================================================
 # --- TEST SUITE ---
 # ==============================================================================
@@ -110,6 +118,71 @@ end
 @testset "PDEStudioCore.jl Physical Experiments" begin
     set_stat_preset!("hyperbolic")
     set_save_path!(mktempdir())
+    @test NoSimData() isa NoSimData
+
+    @testset "Dictionary Creation Utilities" begin
+        @testset "ParamDict Creators" begin
+            # 1. Empty creator
+            d_empty = create_param_dict()
+            @test d_empty isa ParamDict
+            @test isempty(d_empty)
+
+            # 2. Pair... arguments (mixed String and Symbol keys)
+            d_pairs = create_param_dict("a" => 1, :b => 2.0)
+            @test d_pairs isa ParamDict
+            @test d_pairs[:a] == 1
+            @test d_pairs[:b] == 2.0
+
+            # 3. Generic collection / Dict input
+            d_iter = create_param_dict(Dict("x" => 10, "y" => 20))
+            @test d_iter isa ParamDict
+            @test d_iter[:x] == 10
+            @test d_iter[:y] == 20
+        end
+
+        @testset "MethodDict Creators" begin
+            # 1. Empty creator
+            m_empty = create_method_dict()
+            @test m_empty isa MethodDict
+            @test isempty(m_empty)
+
+            # 2. Pair... arguments with nested String/Symbol dictionaries
+            m_pairs = create_method_dict(
+                "upwind" => Dict("cfl" => 0.5),
+                :lax => Dict(:cfl => 0.8)
+            )
+            @test m_pairs isa MethodDict
+            @test m_pairs[:upwind] isa ParamDict
+            @test m_pairs[:upwind][:cfl] == 0.5
+            @test m_pairs[:lax][:cfl] == 0.8
+
+            # 3. Generic collection input
+            raw_methods = Dict("method_a" => Dict("order" => 2))
+            m_iter = create_method_dict(raw_methods)
+            @test m_iter isa MethodDict
+            @test m_iter[:method_a] isa ParamDict
+            @test m_iter[:method_a][:order] == 2
+        end
+
+        @testset "VariedDict Creators" begin
+            # 1. Empty creator
+            v_empty = create_varied_dict()
+            @test v_empty isa VariedDict
+            @test isempty(v_empty)
+
+            # 2. Pair... arguments
+            v_pairs = create_varied_dict("N" => [50, 100], :cfl => [0.1, 0.5])
+            @test v_pairs isa VariedDict
+            @test v_pairs[:N] == [50, 100]
+            @test v_pairs[:cfl] == [0.1, 0.5]
+
+            # 3. Generic collection input
+            raw_varied = Dict("dx" => [0.1, 0.01])
+            v_iter = create_varied_dict(raw_varied)
+            @test v_iter isa VariedDict
+            @test v_iter[:dx] == [0.1, 0.01]
+        end
+    end
     
     @testset "Manual Solver Execution (Upwind)" begin
         params_50 = create_param_dict(:N => 50, :scheme => "upwind", :cfl => 0.5)
@@ -147,12 +220,12 @@ end
         
         # 2. Build the Config
         config = SimulationConfig(
-            :advection_solver_1d, 
+            "advection_solver_1d", 
             shared, 
             methods, 
             [:upwind, :lax_friedrichs]; 
             varied_params = varied,
-            ref_func_name = :exact_advection_factory
+            ref_func_name = "exact_advection_factory"
         )
         
         # 3. Execute the full Cartesian sweep (4 simulations total)
@@ -184,6 +257,58 @@ end
         err_50 = sim_lf_50.stats[:l1error][end][1]
         err_100 = sim_lf_100.stats[:l1error][end][1]
         @test err_100 < err_50
+    end
+    @testset "Sub-Tuple Varied Sweeps & Parameter Assembly" begin
+        # Verify generate_method_tasks directly parses and reconstructs tuples
+        base_params = create_param_dict(
+            :Ns => (10, 10),
+            :scheme => "upwind",
+            :cfl => 0.5
+        )
+
+        # Test both alphanumeric and numeric axis suffixes (__x, __y and __1, __2)
+        active_keys = [:Ns__x, :Ns__2]
+        active_values = [[20, 40], [15, 30]]
+
+        tasks, grid_indices = generate_method_tasks(base_params, active_keys, active_values)
+
+        @test length(tasks) == 4
+        @test length(grid_indices) == 4
+
+        # Check all Cartesian product combinations were reconstructed into Tuples
+        expected_tuples = [(20, 15),  (40, 15), (20, 30), (40, 30)]
+        reconstructed_tuples = [t[:Ns] for t in tasks]
+        @test reconstructed_tuples == expected_tuples
+        @test all(t[:Ns] isa Tuple{Int, Int} for t in tasks)
+
+        shared = create_param_dict(:Ns => (10, 10), :cfl => 0.5)
+        methods = create_method_dict(:upwind => create_param_dict(:scheme => "upwind"))
+        varied = create_varied_dict(:Ns__1 => [20, 30], :Ns__y => [5, 15])
+
+        config = SimulationConfig(
+            :dummy_tuple_solver,
+            shared,
+            methods,
+            [:upwind];
+            varied_params = varied
+        )
+
+        run_all_simulations(config; force_overwrite=true, calculate_stats=false)
+
+        for Nx in [20, 30]
+            for Ny in [5, 15]
+                p = create_param_dict(
+                    :Ns => (Nx, Ny),
+                    :scheme => "upwind",
+                    :cfl => 0.5
+                )
+
+                @test does_sim_data_exist(p)
+                sim = load_sim_data(p)
+                @test sim.params[:Ns] == (Nx, Ny)
+                @test size(sim.u, 1) == Nx
+            end
+        end
     end
     @testset "Data Conversion & Caching Pipeline" begin
         # 1. Generate and save a baseline Eulerian dataset to disk
