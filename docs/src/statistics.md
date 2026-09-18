@@ -1,6 +1,6 @@
 # Statistics and Analytics
 
-**PDECore.jl** features a powerful, multithreaded statistical integration pipeline. Instead of forcing you to write complex loops to average data over space or time, the backend automatically slices your multidimensional Eulerian tensors or Lagrangian particle series, executes your custom math, and saves the reduced data to disk.
+**PDEStudioCore.jl** features a powerful, multithreaded statistical integration pipeline. Instead of forcing you to write complex loops to average data over space or time, the backend automatically slices your multidimensional Eulerian tensors or Lagrangian particle series, executes your custom math, and saves the reduced data to disk.
 
 By default, the global statistics registry starts completely empty, ensuring the backend makes no assumptions about your physical model.
 
@@ -9,8 +9,8 @@ By default, the global statistics registry starts completely empty, ensuring the
 If you are working with standard physical models, you can load a predefined suite of statistics. For example, to load standard metrics for hyperbolic PDEs (like mass, L1/L2 errors, and wave heights):
 
 ```julia
-using PDECore
-PDECore.set_stat_preset!("hyperbolic")
+using PDEStudioCore
+PDEStudioCore.set_stat_preset!("hyperbolic")
 ```
 
 ## 2. Automated Integration (via `calc_stat`)
@@ -24,16 +24,16 @@ You can use the built-in aliases (`:all`, `:space`, `:time`) or an explicit vect
 
 ```julia
 # We want a time series, so we tell the registry to retain the :time dimension
-PDECore.register_stat!(:custom_energy, :time)
+PDEStudioCore.register_stat!(:custom_energy, :time)
 ```
 
 ### Step B: Overload `calc_stat`
-Next, write a method extending `PDECore.calc_stat` for your specific metric. The backend will automatically multithread this function across your data slices.
+Next, write a method extending `PDEStudioCore.calc_stat` for your specific metric. The backend will automatically multithread this function across your data slices.
 
 ```julia
-function PDECore.calc_stat(::Val{:custom_energy}, fixed_coords, u, ana, domain::DomainInfo)
+function PDEStudioCore.calc_stat(::Val{:custom_energy}, fixed_coords, u, ana, domain::DomainInfo)
     # 1. Fetch the combined scalar measure (e.g., dx * dy) for the dimensions being integrated
-    measure = PDECore.get_integration_measure(:custom_energy, domain)
+    measure = PDEStudioCore.get_integration_measure(:custom_energy, domain)
     
     # 2. Perform your math (u and ana are pre-sliced 1D iterators)
     return sum(abs2.(u) .* measure)
@@ -62,7 +62,7 @@ function my_post_process(sim_data)
     max_val = maximum(sim_data.u)
     
     # 2. Inject it into the dataset, explicitly declaring it has no dimensions (Symbol[])
-    PDECore.add_stat!(sim_data, :global_maximum, max_val, Symbol[])
+    PDEStudioCore.add_stat!(sim_data, :global_maximum, max_val, Symbol[])
     
     # 3. Return true to instruct the backend to overwrite the file on disk!
     return true

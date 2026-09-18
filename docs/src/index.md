@@ -1,10 +1,8 @@
-# PDECore.jl
+# PDEStudioCore.jl
 
-**PDECore.jl** is a robust, headless-safe Julia backend engineered for the execution, management, and statistical analysis of Partial Differential Equation (PDE) simulations. 
+**PDEStudioCore.jl** is a robust, headless-safe Julia backend engineered for the execution, management, and statistical analysis of Partial Differential Equation (PDE) simulations. 
 
 Designed with reproducible academic research in mind, it provides a unified framework for generating strictly typed, precision-agnostic Eulerian and Lagrangian datasets. It features deterministic cryptographic hashing for simulation parameters, automated disk caching, and a highly optimized multithreaded statistical integration pipeline. 
-
-> **Note:** This package serves exclusively as the numerical and data-management backend. For interactive Makie-based visualization and UI controls, pair this package with its sister frontend, **PDEStudio.jl**.
 
 ---
 
@@ -55,13 +53,13 @@ To have the backend automatically integrate a custom metric across specific dime
 
 ```julia
 # Overload for your custom metric
-function PDECore.calc_stat(::Val{:my_custom_error}, fixed_coords, u, ana, domain::DomainInfo)
-    measure = PDECore.get_integration_measure(:my_custom_error, domain)
+function PDEStudioCore.calc_stat(::Val{:my_custom_error}, fixed_coords, u, ana, domain::DomainInfo)
+    measure = PDEStudioCore.get_integration_measure(:my_custom_error, domain)
     return sum(abs.(u .- ana) .* measure)
 end
 
 # Register the statistic and declare which dimensions to retain
-PDECore.register_stat!(:my_custom_error, :time)
+PDEStudioCore.register_stat!(:my_custom_error, :time)
 ```
 You can explicitly define a vector of dimension symbols to keep (e.g., `[:x, :y]`), or use the built-in aliases: `:all` (full tensor), `:space` (integrates out time), or `:time` (integrates out space).
 
@@ -70,7 +68,7 @@ If your statistic bypasses standard integration and you want to append a pre-cal
 
 ```julia
 # Bypasses calc_stat and directly inserts the stat into the dictionary and registry
-PDECore.add_stat!(sim_data, :custom_metric, my_value_array, :time)
+PDEStudioCore.add_stat!(sim_data, :custom_metric, my_value_array, :time)
 ```
 
 ---
@@ -85,6 +83,6 @@ A core part of the architecture is the `dim_keys` field inside `DomainInfo`.
 
 ## 🚀 Examples
 
-To help you get started with the `PDECore` pipeline, we provide complete, runnable examples in the `examples/` directory.
+To help you get started with the `PDEStudioCore` pipeline, we provide complete, runnable examples in the `examples/` directory.
 
 *   **`examples/dummy.jl`**: A minimal, self-contained quick-start script. It demonstrates how to set up a shared parameter pool, define numerical methods, sweep over time-step sizes, and run a mock 1D wave simulation.

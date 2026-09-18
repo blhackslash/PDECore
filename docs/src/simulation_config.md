@@ -1,6 +1,6 @@
 # Orchestrating with SimulationConfig
 
-The `SimulationConfig` is the central orchestration structure in **PDECore.jl**. Instead of writing nested `for` loops to iterate over parameters, numerical methods, and grid resolutions, you define a single blueprint. The backend automatically parses this to generate, hash, and execute the exact Cartesian product of your parameter space.
+The `SimulationConfig` is the central orchestration structure in **PDEStudioCore.jl**. Instead of writing nested `for` loops to iterate over parameters, numerical methods, and grid resolutions, you define a single blueprint. The backend automatically parses this to generate, hash, and execute the exact Cartesian product of your parameter space.
 
 > **Note:** This guide breaks down the configuration step by step. If you prefer to see the complete, runnable script all at once, you can find it in your repository at `examples/dummy.jl`.
 
@@ -8,15 +8,15 @@ The `SimulationConfig` is the central orchestration structure in **PDECore.jl**.
 
 ## Step 1: Setting the Target Module
 
-Because `PDECore.jl` is designed to be a heavily serialized, headless backend, it does not require you to pass compiled function closures directly. Instead, you pass the **names** of your functions as Strings or Symbols. 
+Because `PDEStudioCore.jl` is designed to be a heavily serialized, headless backend, it does not require you to pass compiled function closures directly. Instead, you pass the **names** of your functions as Strings or Symbols. 
 
 First, we must tell the backend which module to search when looking up these function names. This is usually `Main` or your custom package module.
 
 ```julia
-using PDECore
+using PDEStudioCore
 
-# Register the namespace so PDECore can dynamically find our solver later
-PDECore.set_target_module!(@__MODULE__)
+# Register the namespace so PDEStudioCore can dynamically find our solver later
+PDEStudioCore.set_target_module!(@__MODULE__)
 ```
 
 ## Step 2: Defining the Simulation Function

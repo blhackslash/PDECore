@@ -1,13 +1,13 @@
 using Documenter
-using PDECore
+using PDEStudioCore
 
 makedocs(
-    sitename = "PDECore.jl",
-    modules = [PDECore],
+    sitename = "PDEStudioCore.jl",
+    modules = [PDEStudioCore],
     checkdocs = :exports,
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", "false") == "true",
-        canonical = "https://blhackslash.github.io/PDECore.jl/",
+        canonical = "https://blhackslash.github.io/PDEStudioCore.jl/",
         assets = String[],
     ),
     pages = [
@@ -20,7 +20,7 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/blhackslash/PDECore.jl.git",
+    repo = "github.com/blhackslash/PDEStudioCore.jl.git",
     devbranch = "main",
     push_preview = true,
 )
