@@ -67,6 +67,43 @@ function exact_advection_factory(params::ParamDict)
 end
 
 # ==============================================================================
+# --- EXPERIMENT: 1D Lagrangian Particle Tracking ---
+# ==============================================================================
+
+function particle_solver_1d(params::ParamDict)
+    N = params[:N]
+    v = get(params, :v, 1.0)
+    
+    x0 = collect(range(0.0, 1.0, length=N))
+    t = [0.0, 0.5, 1.0]
+    Nt = length(t)
+    
+    x_traj = Vector{Vector{SVector{1, Float64}}}(undef, Nt)
+    u_traj = Vector{Vector{SVector{1, Float64}}}(undef, Nt)
+    
+    for i in 1:Nt
+        x_traj[i] = [SVector{1, Float64}(pos + v * t[i]) for pos in x0]
+        # Dummy property scalar (e.g., mass or concentration = 1.0)
+        u_traj[i] = [SVector{1, Float64}(1.0) for _ in x0] 
+    end
+    
+    # Trigger the Lagrangian constructor
+    return create_sim_data(x_traj, u_traj, t, params; time_dim=:t)
+end
+
+function exact_particle(st::SVector{2, Float64})
+    # st = [x, t]. The exact scalar property is just 1.0.
+    return SVector{1, Float64}(1.0)
+end
+
+# Define a custom pointwise field statistic for coverage
+PDEStudioCore.register_stat!(:pointwise_diff, :all)
+function PDEStudioCore.calc_stat(::Val{:pointwise_diff}, fixed_coords, u, ana, domain::DomainInfo)
+    # The Lagrangian field evaluator passes 1-element tuples for specific particles
+    return u[1] - ana[1]
+end
+
+# ==============================================================================
 # --- TEST SUITE ---
 # ==============================================================================
 
@@ -291,5 +328,40 @@ end
         sim_rehashed = load_sim_data(params_new)
         @test !haskey(sim_rehashed.params, :obsolete)
         @test sim_rehashed.params[:target] == true
+    end
+    @testset "Lagrangian Pipeline & Custom Stats" begin
+        # 1. Create Lagrangian Data
+        params_L = create_param_dict(:N => 10, :v => 2.0)
+        sim_L = particle_solver_1d(params_L)
+        
+        @test sim_L isa LSimData
+        @test length(sim_L.x) == 3 # 3 time steps simulated
+        
+        # 2. Test generate_reference_simdata for Lagrangian grids
+        # res requires (spatial_res, temporal_res) for a 2D spacetime domain
+        ref_L = generate_reference_simdata(exact_particle, params_L, sim_L.domain, (10, 3), Val(:lagrangian))
+        @test ref_L isa LSimData
+        @test length(ref_L.u) == 3
+        
+        # 3. Test Custom Stat Injection (add_stat!)
+        # Inject a custom execution time metric (scalar, 0 dimensions kept)
+        add_stat!(sim_L, :execution_time, 0.042, Symbol[])
+        @test haskey(sim_L.stats, :execution_time)
+        @test get_kept_dims(:execution_time, sim_L.domain) == Symbol[]
+        @test sim_L.stats[:execution_time] == SVector{1, Float64}(0.042)
+        
+        # 4. Test calculate_all_stats! for Lagrangian series and fields
+        # This will evaluate standard series (like :l1error) and our custom :pointwise_diff field
+        calculate_all_stats!(sim_L, exact_particle)
+        
+        # Verify Series Evaluation (Time-retained metrics)
+        @test haskey(sim_L.stats, :l1error)
+        @test all(err -> isapprox(err[1], 0.0, atol=1e-12), sim_L.stats[:l1error])
+        
+        # Verify Field Evaluation (All-dimensions-retained metrics)
+        @test haskey(sim_L.stats, :pointwise_diff)
+        @test length(sim_L.stats[:pointwise_diff]) == 3 # 3 time steps
+        @test length(sim_L.stats[:pointwise_diff][1]) == 10 # 10 particles per step
+        @test all(diff -> isapprox(diff[1], 0.0, atol=1e-12), sim_L.stats[:pointwise_diff][1])
     end
 end

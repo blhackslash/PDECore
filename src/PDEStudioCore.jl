@@ -14,7 +14,7 @@ import Base: show
 
 # --- 2. Top-Level Exports ---
 # Core Types
-export AbstractSimData, ESimData, LSimData, NoSimData, SimulationConfig
+export AbstractSimData, ESimData, LSimData, NoSimData, SimulationConfig, DomainInfo
 export ParamDict, MethodDict, VariedDict, FixedDict
 export create_param_dict, create_method_dict, create_varied_dict, create_sim_data
 
