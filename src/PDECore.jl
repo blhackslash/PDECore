@@ -1,11 +1,11 @@
 """
-    PDECore
+    PDEStudioCore
 
 A robust, headless-safe backend for the execution, management, and statistical analysis of Partial Differential Equation (PDE) simulations.
 
 Provides a unified framework for generating strictly typed Eulerian (`ESimData`) and Lagrangian (`LSimData`) datasets, deterministic parameter hashing, automated disk caching, and a multithreaded statistical integration pipeline.
 """
-module PDECore
+module PDEStudioCore
 
 # --- 1. Headless-Safe Dependencies ---
 using LinearAlgebra, StaticArrays, ProgressMeter, Polyester, Interpolations
@@ -32,12 +32,11 @@ export get_ignore_keys, is_reference_method
 export resolve_simulation_function, resolve_reference_function, resolve_dynamic_function
 
 # --- 3. Core Logic Inclusions ---
-# (Adjust file paths based on how you moved them into ISimPDEs/src/)
-include("Structs.jl")             # Backend structs only (No Observables!)
-include("IOUtils.jl")             # Saving, loading, hashing
-include("ConversionUtils.jl")     # Lagrange -> Euler, parsing
-include("StatCalculation.jl")     # Dierckx, QuadGK, Norms
-include("Simulations.jl")         # run_smart_simulation, runAllSimulations
+include("Structs.jl")
+include("IOUtils.jl")
+include("ConversionUtils.jl")
+include("StatCalculation.jl")
+include("Simulations.jl")
 
 
 

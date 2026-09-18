@@ -132,7 +132,7 @@ Represents Eulerian grid data. The mathematical fields are defined on a static, 
 """
 mutable struct ESimData{D, DS, M, T} <: AbstractSimData{D, DS, M, T}
     params::ParamDict
-    domain::DomainInfo{D, T} # You can optionally parameterize DomainInfo with T as well
+    domain::DomainInfo{D, T}
     axes::NTuple{D, Vector{T}}
     u::Array{SVector{M, T}, D}
     stats::StatDict{M, T}
@@ -206,7 +206,7 @@ function SimulationConfig(
     varied_params::Dict = create_varied_dict(),
     ref_func_name::Union{String, Symbol, Nothing} = nothing,
     post_process_name::Union{String, Symbol, Nothing} = nothing,
-    source_files::Union{<:AbstractString, Vector{String}} = String[] # THE FIX: Optional input
+    source_files::Union{<:AbstractString, Vector{String}} = String[]
 )
     target_module = _TARGET_MODULE[]
     

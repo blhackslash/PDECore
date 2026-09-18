@@ -69,7 +69,6 @@ function generate_method_tasks(base_params::ParamDict, active_keys::Vector{Symbo
     processed_base = copy(base_params)
 
     # --- 1. Pre-parse Varied Parameters (Active Keys) ---
-    # Regex parsing is slow! We only do it once here instead of N times in the grid.
     varied_std = Tuple{Int, Symbol}[]       # Stores: (index_in_pvals, key)
     varied_tup = Tuple{Int, Symbol, Int}[]  # Stores: (index_in_pvals, base_name, tuple_idx)
     
@@ -108,7 +107,7 @@ function generate_method_tasks(base_params::ParamDict, active_keys::Vector{Symbo
         
         # Apply Standard Varied Parameters
         for (i, k) in varied_std
-            # User's Safety Skip: Only update if it exists in base
+            # Only update if it exists in base
             !haskey(task_params, k) && continue 
             task_params[k] = p_vals[i]
         end
@@ -118,7 +117,7 @@ function generate_method_tasks(base_params::ParamDict, active_keys::Vector{Symbo
             tup_updates = Dict{Symbol, Vector{Any}}()
             
             for (i, base, idx) in varied_tup
-                # User's Safety Skip applied directly to the resolved base tuple
+
                 !haskey(task_params, base) && continue 
                 
                 if !haskey(tup_updates, base)
@@ -310,7 +309,7 @@ function run_all_simulations(
                         return true # Fallback if metadata is missing
                     end
                     
-                    # If all standard stats are present, instantly skip to the next file!
+                    # If all standard stats are present, instantly skip to the next file
                     if !needs_stats
                         counter2[] += 1
                         ProgressMeter.update!(p2, counter2[])

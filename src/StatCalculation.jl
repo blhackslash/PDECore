@@ -2,7 +2,7 @@ using ProgressMeter
 using Random
 using StaticArrays
 using LinearAlgebra
-using Polyester # For @batch
+using Polyester
 
 # ==============================================================================
 # --- Central Plugin Registry (Dimension-Based) ---
@@ -51,7 +51,7 @@ julia> set_stat_preset!("hyperbolic")
 function set_stat_preset!(name::String)
     preset_path = joinpath(@__DIR__, "../presets", "$name.jl")
     if isfile(preset_path)
-        # Evaluates the preset file inside the PDECore module namespace
+        # Evaluates the preset file inside the PDEStudioCore module namespace
         Base.include(@__MODULE__, preset_path)
         @info "Successfully loaded stat preset: $name"
     else
@@ -128,7 +128,6 @@ function get_kept_dims(stat::Symbol, domain::DomainInfo)
     end
 end
 
-# --- THE NEW TRANSLATOR HELPER ---
 """
     get_kept_indices(stat::Symbol, domain::DomainInfo)
 
@@ -262,12 +261,9 @@ function calculate_all_stats!(sim_data::AbstractSimData, ref_func; force_overwri
         
         if !isnothing(res)
             if !is_all_nan(res)
-                # Valid stat calculated
                 sim_data.stats[stat_name] = res
                 stat_change = true
             else
-                # If it evaluates to NaNs but previously existed (force_overwrite),
-                # we delete it to maintain consistency and flag the change.
                 if haskey(sim_data.stats, stat_name)
                     delete!(sim_data.stats, stat_name)
                     stat_change = true

@@ -72,14 +72,12 @@ function val2str(v; top_level::Bool=true)
     elseif isa(v, Symbol) 
         return repr(v)
     elseif isa(v, AbstractString)
-        # Drop the explicit quotes for top-level strings so the CSV writes them cleanly!
         return top_level ? String(v) : repr(v)
     elseif isa(v, Number) || isa(v, Type)
         return string(v)
     elseif isa(v, AbstractArray)
         T = eltype(v)
         prefix = T === Any ? "Any" : string(T)
-        # Pass top_level=false so inner strings get their protective quotes back
         elements = join([val2str(x; top_level=false) for x in v], ", ")
         return "$(prefix)[$elements]"
     elseif isa(v, Tuple)
@@ -125,10 +123,9 @@ function str2val(val_str::AbstractString)
     end
     
     try
-        # Safely evaluates nicely formatted code: Symbol[:RK2], Dict{Int, Float64}(...), true, 42.0
         return eval(Meta.parse(val_str))
     catch e
-        # Fallback for custom structs (GeometricDomain(...)) or raw unquoted UI strings
+        # Fallback for custom structs or raw unquoted UI strings
         return replace(val_str, r"^\"|\"$" => "")
     end
 end
@@ -159,7 +156,6 @@ function set_save_path!(path::String)
     abs_path = abspath(path) # Ensure absolute path
     path_ok = false
 
-    # Ensure the main directory exists
     if !isdir(abs_path)
         @warn "Save path does not exist: $abs_path. Attempting to create..."
         try
@@ -175,7 +171,7 @@ function set_save_path!(path::String)
     end
 
     if path_ok
-        _SAVE_ROOT_PATH[] = abs_path # Update the path stored in the Ref
+        _SAVE_ROOT_PATH[] = abs_path
         @info "Module save root path set to: $(_SAVE_ROOT_PATH[])"
 
         # Create standard subdirectories
@@ -222,7 +218,6 @@ This ensures that any structural changes to the parameters result in a strictly 
 """
 function calculate_hash(params::ParamDict)
     sorted_keys = sort(collect(keys(params)), by=string)
-    # Feed val2str directly into the hashing engine for a bulletproof signature
     stringToHash = join(["$k => $(val2str(params[k]))" for k in sorted_keys], ", ")
     return bytes2hex(sha256(stringToHash))
 end
@@ -264,8 +259,6 @@ function get_file_name(params::ParamDict)
     # Return the most recent file matching the exact cryptographic hash
     sort!(candidate_files, by = f -> mtime(joinpath(save_data, f)), rev=true)
     
-    # Cryptographic guarantee: if the SHA-256 hash matches, we do not need 
-    # to load the file into RAM to verify structural equality.
     return joinpath(save_data, candidate_files[1])
 end
 
@@ -285,21 +278,16 @@ already exists, it will only overwrite it if explicitly instructed.
 - `overwrite::Bool`: If `true`, deletes the existing raw data and outdated conversion caches before saving. Default is `false`.
 """
 function save_sim_data(sim_data::AbstractSimData; overwrite::Bool = false)
-    # Condense the parameters into a human-readable, closure-free format!
-    # This prevents JLD2 serialization warnings and massively shrinks the file size.
     condensed_params = Dict{Symbol, Any}()
     for (k, v) in sim_data.params
         condensed_params[k] = str2val(val2str(v))
     end
     
-    # Mutate the sim_data's params in place so the heavy objects are stripped out 
-    # before JLD2 attempts to save the 'raw' object to disk.
     empty!(sim_data.params)
     merge!(sim_data.params, condensed_params)
 
     file_name = ""
     try
-        # The hash calculation remains 100% identical because the normalizer is idempotent!
         file_name = get_file_name(sim_data.params)
     catch e
         if !isa(e, SimFileNotFoundError); rethrow(e); end
@@ -318,7 +306,7 @@ function save_sim_data(sim_data::AbstractSimData; overwrite::Bool = false)
             
             # --- WRITE FAST METADATA ---
             file["native"] = sim_data isa ESimData ? :eulerian : :lagrangian
-            file["params"] = sim_data.params # Will now save the clean, stringified dictionary!
+            file["params"] = sim_data.params
             file["stat_keys"] = collect(keys(sim_data.stats))
         end
         @info "Saved 'raw' to $(basename(file_name))"
@@ -339,7 +327,7 @@ function save_sim_data(sim_data::AbstractSimData; overwrite::Bool = false)
                     if haskey(file, "native"); delete!(file, "native"); end
                     file["native"] = sim_data isa ESimData ? :eulerian : :lagrangian
                     
-                    # Ruthlessly clear all stale conversion caches!
+                    # Clear all stale conversion caches
                     for k in keys(file)
                         if startswith(k, "conv_")
                             delete!(file, k)
@@ -432,7 +420,7 @@ it saves this new conversion to the JLD2 file for future fast-loading.
 function load_sim_data(params::ParamDict, ::Val{:eulerian}, res::Tuple)
     file_name = get_file_name(params)
     
-    # 1. Check if the raw data is ALREADY the perfect Eulerian grid we need
+    # 1. Check if the raw data is of required resolution
     is_perfect_match = jldopen(file_name, "r") do file
         raw = file["raw"]
         return raw isa ESimData && size(raw.u) == res
@@ -460,10 +448,9 @@ function load_sim_data(params::ParamDict, ::Val{:eulerian}, res::Tuple)
         resample_eulerian(raw_data, res)
     end
     
-    # --- NEW: Conditionally cache the generated conversion ---
+    # 4. Cache resolution if enabled
     if _ENABLE_CONV_CACHE[]
         jldopen(file_name, "a+") do file
-            # Safe check in case of thread race conditions
             if !haskey(file, key)
                 file[key] = conv_data
             end
@@ -503,7 +490,7 @@ function load_sim_data(params::ParamDict, ::Val{:lagrangian})
             raw_data = load_sim_data(params, Val(:raw))
             conv_data = convert_to_lagrangian(raw_data)
             
-            # --- NEW: Conditionally cache the generated conversion ---
+            # Cache conversion if enabled
             if _ENABLE_CONV_CACHE[]
                 jldopen(file_name, "a+") do file
                     if !haskey(file, "conv_L")
@@ -604,7 +591,7 @@ function does_sim_data_exist(params::ParamDict, ::Val{:eulerian}, res::Tuple)
             end
         end
         
-        # If not a perfect raw match (or native is Lagrangian), check for the explicit cached key
+        # If not a perfect raw match check for the explicit cached key
         target_key = get_conv_key(res)
         return jldopen(file_name, "r") do file; haskey(file, target_key); end
         
@@ -631,33 +618,85 @@ function does_sim_data_exist(params::ParamDict, ::Val{:lagrangian})
     end
 end
 
-"""
-    check_data(data::AbstractSimData)
+# ==============================================================================
+# --- DATA HEALTH CHECKING ---
+# ==============================================================================
 
-Generates a fast, allocation-free `DataFrame` summarizing the numerical health 
-of the dataset. Calculates the Min, Max, Mean, and NaN count for every field component 
-at every timestep. 
-
-Works natively on both `ESimData` and `LSimData` structures.
-
-# Arguments
-- `data::AbstractSimData`: The simulation object to analyze.
-
-# Returns
-- `DataFrame`: A tabular summary with the first column as `:Time` and subsequent columns formatted as `:C{m}_Min`, `:C{m}_Max`, etc., for each component `m`.
-"""
-function check_data(data::AbstractSimData)
-    T_len = length(data.t)
+function _aggregate_component(iterator)
+    min_v, max_v = Inf, -Inf
+    sum_v = 0.0
+    valid_count, nan_count = 0, 0
     
-    # Dynamically determine the number of components (M)
-    M = if data isa ESimData
-        size(data.u, 1)
-    else
-        # For Lagrangian, peek at the first valid particle of the first timestep
-        length(data.u) > 0 && length(data.u[1]) > 0 ? length(data.u[1][1]) : 1
+    for val in iterator
+        if isnan(val)
+            nan_count += 1
+        else
+            min_v = min(min_v, val)
+            max_v = max(max_v, val)
+            sum_v += val
+            valid_count += 1
+        end
     end
     
-    # Preallocate the dictionary to build the DataFrame
+    mean_v = valid_count > 0 ? sum_v / valid_count : NaN
+    min_v = valid_count > 0 ? min_v : NaN
+    max_v = valid_count > 0 ? max_v : NaN
+    
+    return min_v, max_v, mean_v, Float64(nan_count)
+end
+
+"""
+    check_data(data::ESimData)
+
+Generates a fast, allocation-free `DataFrame` summarizing the numerical health 
+of the Eulerian dataset. Aggregates the entire spacetime grid into a single row, 
+reporting the Min, Max, Mean, and NaN count for every field component.
+
+# Arguments
+- `data::ESimData`: The Eulerian simulation object to analyze.
+
+# Returns
+- `DataFrame`: A single-row tabular summary for all components.
+"""
+function check_data(data::ESimData)
+    M = length(data.u) > 0 ? length(first(data.u)) : 1
+    
+    df_dict = Dict{Symbol, Vector{Float64}}()
+    df_dict[:Time] = [NaN] # Indicates time was aggregated across the full tensor
+    
+    for c in 1:M
+        iterator = (v[c] for v in data.u)
+        min_v, max_v, mean_v, nan_count = _aggregate_component(iterator)
+        
+        df_dict[Symbol("C$(c)_Min")]  = [min_v]
+        df_dict[Symbol("C$(c)_Max")]  = [max_v]
+        df_dict[Symbol("C$(c)_Mean")] = [mean_v]
+        df_dict[Symbol("C$(c)_NaNs")] = [nan_count]
+    end
+    
+    df = DataFrame(df_dict)
+    select!(df, :Time, Not(:Time))
+    
+    return df
+end
+
+"""
+    check_data(data::LSimData)
+
+Generates a fast, allocation-free `DataFrame` summarizing the numerical health 
+of the Lagrangian dataset step-by-step. Calculates the Min, Max, Mean, and NaN 
+count for every field component at every recorded timestep.
+
+# Arguments
+- `data::LSimData`: The Lagrangian simulation object to analyze.
+
+# Returns
+- `DataFrame`: A tabular summary with the first column as `:Time`, generating one row per timestep.
+"""
+function check_data(data::LSimData)
+    T_len = length(data.t)
+    M = length(data.u) > 0 && length(data.u[1]) > 0 ? length(data.u[1][1]) : 1
+    
     df_dict = Dict{Symbol, Vector{Float64}}()
     df_dict[:Time] = data.t
     
@@ -670,48 +709,16 @@ function check_data(data::AbstractSimData)
     
     for m in 1:T_len
         for c in 1:M
-            # Fast, allocation-free accumulators
-            min_v, max_v = Inf, -Inf
-            sum_v = 0.0
-            valid_count, nan_count = 0, 0
+            iterator = (p[c] for p in data.u[m])
+            min_v, max_v, mean_v, nan_count = _aggregate_component(iterator)
             
-            # 1. Extract the data iterator based on the struct type
-            iterator = if data isa ESimData
-                # Slice: [Component, X, Y, Z..., Time] -> extract specific component & time
-                selectdim(selectdim(data.u, ndims(data.u), m), 1, c)
-            else
-                # Map lazily over the particles at this timestep
-                (p[c] for p in data.u[m])
-            end
-            
-            # 2. Single-pass evaluation (Zero memory allocations!)
-            for val in iterator
-                if isnan(val)
-                    nan_count += 1
-                else
-                    min_v = min(min_v, val)
-                    max_v = max(max_v, val)
-                    sum_v += val
-                    valid_count += 1
-                end
-            end
-            
-            # 3. Save to our DataFrame dictionary
+            df_dict[Symbol("C$(c)_Min")][m]  = min_v
+            df_dict[Symbol("C$(c)_Max")][m]  = max_v
+            df_dict[Symbol("C$(c)_Mean")][m] = mean_v
             df_dict[Symbol("C$(c)_NaNs")][m] = nan_count
-            
-            if valid_count > 0
-                df_dict[Symbol("C$(c)_Min")][m]  = min_v
-                df_dict[Symbol("C$(c)_Max")][m]  = max_v
-                df_dict[Symbol("C$(c)_Mean")][m] = sum_v / valid_count
-            else
-                df_dict[Symbol("C$(c)_Min")][m]  = NaN
-                df_dict[Symbol("C$(c)_Max")][m]  = NaN
-                df_dict[Symbol("C$(c)_Mean")][m] = NaN
-            end
         end
     end
     
-    # Construct the DataFrame and force the 'Time' column to be first
     df = DataFrame(df_dict)
     select!(df, :Time, Not(:Time))
     
@@ -747,7 +754,6 @@ function delete_sim_data(keys::Vector{Symbol}, vals::Vector)
             sim_data = load(full_path, "raw")
             deletion = true
             for (i,key) in enumerate(keys)
-                # Now safely comparing against a strictly typed ParamDict
                 if !haskey(sim_data.params, key) || !(sim_data.params[key] == vals[i])
                     deletion = false
                     break
@@ -822,7 +828,6 @@ function _rehash_single_file(file_path::String, delete_old::Bool, filter_pairs, 
     if !isnothing(filter_pairs)
         skip = false
         for (k, v) in filter_pairs
-            # Direct comparison (catches both stringified and raw values if typed correctly)
             if !haskey(raw_data.params, k) || raw_data.params[k] != v
                 skip = true
                 break
@@ -854,7 +859,6 @@ function _rehash_single_file(file_path::String, delete_old::Bool, filter_pairs, 
             val_str = strip(readline())
             if !isempty(val_str)
                 try
-                    # Evaluate the user's string as native Julia code (e.g. typing [1, 2] creates a Vector)
                     val = eval(Meta.parse(val_str))
                     raw_data.params[pk] = val
                     @info "  Injected: $pk = $val"
