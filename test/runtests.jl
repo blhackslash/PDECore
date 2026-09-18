@@ -1,80 +1,295 @@
 using Test
-using PDECore
+using PDEStudioCore
 using StaticArrays
+using DataFrames
 
-# 1. Define Mock Structures for Hashing Tests
-struct MockBoundary end
-struct MockDomain
-    bounds::Vector{Float64}
-    bc::MockBoundary
-end
+# 1. Register the namespace so PDEStudioCore can dynamically resolve these functions
+PDEStudioCore.set_target_module!(@__MODULE__)
 
-# 2. Define a Fast Mock Simulation & Reference
-function mock_wave_sim(params::ParamDict)
+# ==============================================================================
+# --- EXPERIMENT: 1D Linear Advection (Upwind & Lax-Friedrichs) ---
+# ==============================================================================
+
+function advection_solver_1d(params::ParamDict)
     N = params[:N]
-
-    # 1D space (0 to 1), 1D time (3 steps)
-    x = collect(range(0.0, 1.0, length=N))
-    t = [0.0, 0.1, 0.2]
-
-    # Constant field of 1.0
-    u = fill(SVector{1, Float64}(1.0), N, length(t))
-
-    return create_sim_data(x, u, t, params; time_dim=:t)
+    scheme = get(params, :scheme, "upwind")
+    cfl = get(params, :cfl, 0.5)
+    
+    L = 2π
+    c = 1.0     
+    
+    # Strictly periodic grid (dropping the redundant endpoint at x=L)
+    dx = L / N  
+    dt = cfl * dx / c
+    T_end = 2.0
+    Nt = ceil(Int, T_end / dt) + 1
+    
+    x = collect(range(0.0, step=dx, length=N))
+    t = collect(range(0.0, step=dt, length=Nt))
+    
+    # Preallocate the spacetime tensor
+    u_num = fill(SVector{1, Float64}(0.0), N, Nt)
+    
+    # Periodic initial condition: u(x,0) = sin(x) + 2.0
+    for i in 1:N
+        u_num[i, 1] = SVector{1, Float64}(sin(x[i]) + 2.0)
+    end
+    
+    # Time Marching
+    for n in 1:(Nt-1)
+        for i in 1:N
+            im1 = i == 1 ? N : i - 1 # Wrap around cleanly
+            ip1 = i == N ? 1 : i + 1 
+            
+            if scheme == "upwind"
+                val = u_num[i, n][1] - cfl * (u_num[i, n][1] - u_num[im1, n][1])
+            elseif scheme == "lax_friedrichs"
+                val = 0.5 * (u_num[ip1, n][1] + u_num[im1, n][1]) - 0.5 * cfl * (u_num[ip1, n][1] - u_num[im1, n][1])
+            else
+                error("Unknown scheme: $scheme")
+            end
+            
+            u_num[i, n+1] = SVector{1, Float64}(val)
+        end
+    end
+    
+    return create_sim_data(x, u_num, t, params; time_dim=:t, x_dim=:x)
 end
 
-# Reference function exactly matching the simulation output
-mock_ref_func(st) = SVector{1, Float64}(1.0)
+function exact_advection(st::SVector{2, Float64})
+    x, t = st[1], st[2]
+    c = 1.0
+    return SVector{1, Float64}(sin(x - c*t) + 2.0)
+end
 
-@testset "PDECore.jl Integration Tests" begin
+function exact_advection_factory(params::ParamDict)
+    return (x -> exact_advection(x))
+end
+
+# ==============================================================================
+# --- TEST SUITE ---
+# ==============================================================================
+
+@testset "PDEStudioCore.jl Physical Experiments" begin
     set_stat_preset!("hyperbolic")
-    tmp_dir = mktempdir()
-    set_save_path!(tmp_dir)
-
-    @testset "Serialization & Hashing" begin
-        domain = MockDomain([0.0, 1.0], MockBoundary())
-        params = create_param_dict(:domain => domain, :N => 50)
-        hash_1 = calculate_hash(params)
-
-        domain_identical = MockDomain([0.0, 1.0], MockBoundary())
-        params_identical = create_param_dict(:domain => domain_identical, :N => 50)
-        hash_2 = calculate_hash(params_identical)
-
-        @test hash_1 == hash_2
+    set_save_path!(mktempdir())
+    
+    @testset "Manual Solver Execution (Upwind)" begin
+        params_50 = create_param_dict(:N => 50, :scheme => "upwind", :cfl => 0.5)
+        params_100 = create_param_dict(:N => 100, :scheme => "upwind", :cfl => 0.5)
+        
+        sim_50 = advection_solver_1d(params_50)
+        sim_100 = advection_solver_1d(params_100)
+        
+        calculate_all_stats!(sim_50, exact_advection)
+        calculate_all_stats!(sim_100, exact_advection)
+        
+        time_idx = get_time_dim(sim_50.domain)
+        t_len = length(sim_50.axes[time_idx])
+        
+        @test haskey(sim_50.stats, :l1error)
+        @test length(sim_50.stats[:mass]) == t_len
+        
+        initial_mass = sim_50.stats[:mass][1][1]
+        @test all(m -> isapprox(m[1], initial_mass; rtol=1e-12), sim_50.stats[:mass])
+        
+        err_50 = sim_50.stats[:l1error][end][1]
+        err_100 = sim_100.stats[:l1error][end][1]
+        @test err_100 < err_50
+        @test 0.45 < (err_100 / err_50) < 0.55
     end
 
-    @testset "Simulation Pipeline & I/O" begin
-        shared = create_param_dict(:N => 10, :wave_speed => 1.0)
-        methods = create_method_dict(:upwind => create_param_dict(:solver => "upwind"))
-
+    @testset "SimulationConfig Pipeline (Sweep & Orchestration)" begin
+        # 1. Define the orchestration layers
+        shared = Dict(:cfl => 0.5, :N => 75)
+        methods = Dict(
+            :upwind => Dict(:scheme => "upwind"),
+            :lax_friedrichs => Dict(:scheme => "lax_friedrichs")
+        )
+        varied = Dict(:N => [50, 100])
+        
+        # 2. Build the Config
         config = SimulationConfig(
-            :mock_wave_sim, shared, methods, [:upwind];
-            varied_params = create_varied_dict(:wave_speed => [1.0, 2.0])
-            )
-
-        run_all_simulations(config; force_overwrite=true, calculate_stats=false)
-
-        task_1_params = create_param_dict(:N => 10, :wave_speed => 1.0, :solver => "upwind")
-        loaded_data = load_sim_data(task_1_params)
-
-        @test loaded_data isa ESimData
-
-        @testset "Statistical Calculations" begin
-            # Run Pass 2 manually on the loaded data
-            calculate_all_stats!(loaded_data, mock_ref_func)
-
-            # 1. Check Standard Metric (:mass keeps :time by default)
-            @test haskey(loaded_data.stats, :mass)
-            @test length(loaded_data.stats[:mass]) == 3 # Should match the 3 time steps
-
-            # 2. Check Error Metric Integration
-            @test haskey(loaded_data.stats, :l1error)
-            # Since simulation and reference are identical (1.0), the error must be 0.0
-            @test all(v -> v[1] ≈ 0.0, loaded_data.stats[:l1error])
-
-            # 3. Check Custom Stat Registration
-            add_stat!(loaded_data, :mock_custom_stat, 42.0, :time)
-            @test get_kept_dims(:mock_custom_stat, loaded_data.domain) == [:t]
+            :advection_solver_1d, 
+            shared, 
+            methods, 
+            [:upwind, :lax_friedrichs]; 
+            varied_params = varied,
+            ref_func_name = :exact_advection_factory
+        )
+        
+        # 3. Execute the full Cartesian sweep (4 simulations total)
+        run_all_simulations(config; force_overwrite=true, calculate_stats=true)
+        
+        # 4. Verify disk state and automated stats generation
+        for scheme in ["upwind", "lax_friedrichs"]
+            for N in [50, 100]
+                p = create_param_dict(:scheme => scheme, :N => N, :cfl => 0.5)
+                
+                # Check that caching and hashing works
+                @test does_sim_data_exist(p)
+                
+                sim = load_sim_data(p)
+                @test sim isa ESimData
+                @test haskey(sim.stats, :l1error)
+                @test haskey(sim.stats, :mass)
+                
+                # Lax-Friedrichs and Upwind both conserve mass on a periodic grid
+                initial_mass = sim.stats[:mass][1][1]
+                @test all(m -> isapprox(m[1], initial_mass; rtol=1e-12), sim.stats[:mass])
+            end
         end
+        
+        # 5. Verify Lax-Friedrichs grid convergence from disk
+        sim_lf_50 = load_sim_data(create_param_dict(:scheme => "lax_friedrichs", :N => 50, :cfl => 0.5))
+        sim_lf_100 = load_sim_data(create_param_dict(:scheme => "lax_friedrichs", :N => 100, :cfl => 0.5))
+        
+        err_50 = sim_lf_50.stats[:l1error][end][1]
+        err_100 = sim_lf_100.stats[:l1error][end][1]
+        @test err_100 < err_50
+    end
+    @testset "Data Conversion & Caching Pipeline" begin
+        # 1. Generate and save a baseline Eulerian dataset to disk
+        params_conv = create_param_dict(:N => 40, :scheme => "upwind", :cfl => 0.5, :test_mode => "conversion")
+        sim_base = advection_solver_1d(params_conv)
+        save_sim_data(sim_base; overwrite=true)
+        
+        # Verify the raw data exists
+        @test does_sim_data_exist(params_conv)
+        
+        @testset "On-the-Fly Conversion (Cache Disabled)" begin
+            enable_cache!(false) 
+            
+            # Eulerian -> Lagrangian
+            sim_L = load_sim_data(params_conv, Val(:lagrangian)) 
+            @test sim_L isa LSimData
+            # Since caching is disabled, the disk check for the conversion should be false
+            @test !does_sim_data_exist(params_conv, Val(:lagrangian)) 
+            
+            # Eulerian -> Resampled Eulerian
+            target_res = (20,30)
+            sim_E_resampled = load_sim_data(params_conv, Val(:eulerian), target_res) 
+            @test sim_E_resampled isa ESimData
+            @test size(sim_E_resampled.u) == target_res
+            @test !does_sim_data_exist(params_conv, Val(:eulerian), target_res) 
+        end
+
+        @testset "Persistent Conversion (Cache Enabled)" begin
+            enable_cache!(true) 
+            
+            # Eulerian -> Lagrangian
+            sim_L = load_sim_data(params_conv, Val(:lagrangian)) 
+            @test does_sim_data_exist(params_conv, Val(:lagrangian)) 
+            
+            # Verify the explicit key was saved to the JLD2 file
+            conversions = list_available_conversions(params_conv) 
+            @test "conv_L" in conversions
+            
+            # Eulerian -> Resampled Eulerian
+            target_res = (25,30)
+            sim_E_resampled = load_sim_data(params_conv, Val(:eulerian), target_res) 
+            @test does_sim_data_exist(params_conv, Val(:eulerian), target_res) 
+            
+            conversions = list_available_conversions(params_conv) 
+            @test "conv_E_25x30" in conversions
+            
+            # Reset cache state to avoid side effects on other tests
+            enable_cache!(false) 
+        end
+        
+        @testset "Algorithmic Integrity (Scatter L -> E)" begin
+            # Test that we can dynamically reconstruct Eulerian data from the Lagrangian particles
+            sim_L = load_sim_data(params_conv, Val(:lagrangian)) 
+            t_length = length(sim_L.t)
+            
+            # Convert back to Eulerian using the scatter algorithm
+            sim_E_reconstructed = convert_to_eulerian(sim_L, (30,t_length)) 
+            @test sim_E_reconstructed isa ESimData
+            @test size(sim_E_reconstructed.u) == (30,t_length)
+            
+            # Verify basic dimensionality integrity 
+            time_idx = get_time_dim(sim_E_reconstructed.domain) 
+            @test length(sim_E_reconstructed.axes[time_idx]) == t_length
+        end
+    end
+    @testset "Data Health Checking (check_data)" begin
+        # 1. Test Eulerian DataFrame Generation
+        params_conv = create_param_dict(:N => 40, :scheme => "upwind", :cfl => 0.5, :test_mode => "conversion")
+        sim_E = load_sim_data(params_conv)
+        
+        df_E = check_data(sim_E) 
+        @test df_E isa DataFrame
+        @test size(df_E, 1) == 1 # Eulerian data must aggregate into a single row
+        @test "C1_NaNs" in names(df_E)
+        @test df_E.C1_NaNs[1] == 0.0 # Our advection solver should not produce NaNs
+        
+        # 2. Test Lagrangian DataFrame Generation
+        sim_L = load_sim_data(params_conv, Val(:lagrangian)) 
+        
+        df_L = check_data(sim_L) 
+        @test df_L isa DataFrame
+        @test size(df_L, 1) == length(sim_L.t) # Lagrangian data must have one row per timestep
+    end
+
+    @testset "Data Management Deletion" begin
+        # 1. Generate a temporary dummy file to safely delete
+        delete_params = create_param_dict(:N => 99, :scheme => "upwind", :cfl => 0.5, :test_flag => "delete_me")
+        keep_params = create_param_dict(:N => 99, :scheme => "upwind", :cfl => 0.5, :test_flag => "keep_me")
+        delete_dummy = advection_solver_1d(delete_params)
+        keep_dummy = advection_solver_1d(keep_params)
+        save_sim_data(delete_dummy; overwrite=true)
+        save_sim_data(keep_dummy; overwrite=true)
+        
+        @test does_sim_data_exist(delete_params)
+        @test does_sim_data_exist(keep_params)
+        
+        # 2. Test Deletion based on exact key-value matches via Dict
+        delete_sim_data(Dict(:N => 99, :test_flag => "delete_me"))
+        @test !does_sim_data_exist(delete_params)
+        @test does_sim_data_exist(keep_params)
+    end
+
+    @testset "Data Management (Rehash)" begin
+        # 1. Setup: Create two distinct dummy files
+        # One will be targeted for rehashing, the other should be ignored by the filter
+        params_target = create_param_dict(:N => 10, :scheme => "upwind", :cfl => 0.5, :target => true, :obsolete => "delete_me")
+        params_ignore = create_param_dict(:N => 11, :scheme => "upwind", :cfl => 0.5, :target => false, :obsolete => "keep_me")
+        
+        sim_target = advection_solver_1d(params_target)
+        sim_ignore = advection_solver_1d(params_ignore)
+        
+        save_sim_data(sim_target; overwrite=true)
+        save_sim_data(sim_ignore; overwrite=true)
+        
+        file_target_old = get_file_name(params_target)
+        file_ignore_old = get_file_name(params_ignore)
+        
+        # 2. Perform the rehash on the entire data directory
+        data_dir = joinpath(get_save_path(), "data")
+        rehash_sim_data(
+            data_dir; 
+            delete_old=true, 
+            filter_pairs=Dict(:target => true), 
+            remove_keys=[:obsolete]
+        )
+        
+        # 3. Verification: Ignored file
+        # The file with :target => false should be completely untouched
+        @test isfile(file_ignore_old)
+        
+        # 4. Verification: Target file
+        # The old file should have been safely deleted
+        @test !isfile(file_target_old)
+        
+        # We manually construct the expected new parameter state to locate the rehashed file
+        params_new = create_param_dict(:N => 10, :scheme => "upwind", :cfl => 0.5, :target => true)
+        
+        # Verify the new file exists with the updated cryptographic hash
+        @test does_sim_data_exist(params_new)
+        
+        # Load the rehashed data and ensure the internal dictionary was scrubbed correctly
+        sim_rehashed = load_sim_data(params_new)
+        @test !haskey(sim_rehashed.params, :obsolete)
+        @test sim_rehashed.params[:target] == true
     end
 end

@@ -23,9 +23,10 @@ export set_save_path!, set_target_module!, get_save_path, get_target_module, ena
 export register_stat!, delete_stat!, add_stat!, get_kept_dims, get_kept_indices
 export get_stat_registry, set_stat_registry!, reset_stat_registry!, set_stat_preset!
 # Simulation & Data Pipeline
-export run_all_simulations, load_sim_data, save_sim_data, generate_method_tasks
+export run_all_simulations, load_sim_data, save_sim_data, generate_method_tasks, get_file_name
 export does_sim_data_exist, delete_sim_data, rehash_sim_data, calculate_hash, print_clean_params
-export calculate_all_stats!, check_data, generate_reference_simdata, val2str, str2val
+export calculate_all_stats!, check_data, generate_reference_simdata, val2str, str2val, get_time_dim
+export convert_to_eulerian, convert_to_lagrangian, resample_eulerian, list_available_conversions
 
 # Utilities
 export get_ignore_keys, is_reference_method

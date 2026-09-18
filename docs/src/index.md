@@ -88,4 +88,3 @@ A core part of the architecture is the `dim_keys` field inside `DomainInfo`.
 To help you get started with the `PDECore` pipeline, we provide complete, runnable examples in the `examples/` directory.
 
 *   **`examples/dummy.jl`**: A minimal, self-contained quick-start script. It demonstrates how to set up a shared parameter pool, define numerical methods, sweep over time-step sizes, and run a mock 1D wave simulation.
-*   **`examples/advanced_simulation.jl`**: *(Coming Soon)* A comprehensive example demonstrating realistic PDE solvers, custom boundary conditions, and analytical reference functions.

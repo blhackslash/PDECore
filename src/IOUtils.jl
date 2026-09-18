@@ -726,35 +726,45 @@ function check_data(data::LSimData)
 end
 
 """
-    delete_sim_data(keys::Vector{Symbol}, vals::Vector)
+    delete_sim_data(match_params::Dict)
 
 Scans the active save directory and permanently deletes any `.jld2` simulation file 
-whose internal parameter dictionary contains exact matches for all provided key-value pairs.
+whose internal parameter dictionary contains exact matches for all provided key-value pairs. 
+Uses lightweight top-level metadata to avoid loading full simulation arrays into memory.
 
 # Arguments
-- `keys::Vector{Symbol}`: A list of parameter keys to match.
-- `vals::Vector`: A list of corresponding values that must perfectly match the keys.
+- `match_params::Dict`: A dictionary containing the parameter keys and values to match.
 
 # Examples
 ```julia-repl
-julia> delete_sim_data([:N, :solver], [100, "upwind"])
+julia> delete_sim_data(Dict(:N => 100, :scheme => "upwind"))
 [ Warning: Deleting file matching criteria: 2026-09-15_14-30-00_a1b2c3d4.jld2
 ```
 """
-function delete_sim_data(keys::Vector{Symbol}, vals::Vector)
-    save_data = get_save_path() * "/data/"
-    if !isdir(save_data); return; end
+function delete_sim_data(match_params::Dict)
+    save_data = joinpath(get_save_path(), "data")
+    if !isdir(save_data)
+        return
+    end
     
     files = readdir(save_data)
     for file in files
-        if !endswith(file, ".jld2"); continue; end
+        if !endswith(file, ".jld2")
+            continue
+        end
         
         full_path = joinpath(save_data, file)
         try
-            sim_data = load(full_path, "raw")
+            # Only load the lightweight metadata dictionary!
+            file_params = jldopen(full_path, "r") do f
+                haskey(f, "params") ? f["params"] : nothing
+            end
+            
+            isnothing(file_params) && continue
+            
             deletion = true
-            for (i,key) in enumerate(keys)
-                if !haskey(sim_data.params, key) || !(sim_data.params[key] == vals[i])
+            for (k, v) in match_params
+                if !haskey(file_params, k) || file_params[k] != v
                     deletion = false
                     break
                 end

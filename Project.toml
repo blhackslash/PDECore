@@ -1,7 +1,7 @@
-name = "PDECore"
+name = "PDEStudioCore"
 uuid = "93766fa7-4b93-4712-aa47-391c0d405e89"
 version = "0.1.0"
-authors = ["Pascal Jung <julia@blackslash.win>"]
+authors = ["Pascal Jung <dev@blackslash.win>"]
 
 [deps]
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
@@ -31,9 +31,3 @@ SHA = "0.7, 1"
 StaticArrays = "1"
 StatsBase = "0.34, 1"
 julia = "1.10"
-
-[extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["Test"]
