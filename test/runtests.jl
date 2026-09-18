@@ -552,12 +552,13 @@ end
             @test clean_from_dict == clean_from_sim
             @test clean_from_dict[:test_id] == "format_E"
 
-            # Test print_clean_params outputs to stdout correctly
-            io_buf = IOBuffer()
-            printed_dict = redirect_stdout(io_buf) do
+            # Capture stdout using a Pipe
+            pipe = Pipe()
+            printed_dict = redirect_stdout(pipe) do
                 PDEStudioCore.print_clean_params(sim_E)
             end
-            out_str = String(take!(io_buf))
+            close(pipe.in)
+            out_str = read(pipe, String)
 
             @test printed_dict == clean_from_dict
             @test occursin("Cleaned Parameters", out_str)
