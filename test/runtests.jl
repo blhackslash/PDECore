@@ -600,4 +600,42 @@ end
             @test_throws PDEStudioCore.SimFileNotFoundError load_sim_data("00000000000000000")
         end
     end
+    @testset "2+1D Eulerian SimData Creation" begin
+        # 1. Setup spatial grids and time vector
+        Nx, Ny, Nt = 12, 8, 4
+        x_vec = collect(range(0.0, 2.0, length=Nx))
+        y_vec = collect(range(-1.0, 1.0, length=Ny))
+        t_vec = collect(range(0.0, 0.5, length=Nt))
+
+        # Generate 2D meshgrids
+        x_grid = [x for x in x_vec, _ in y_vec]
+        y_grid = [y for _ in x_vec, y in y_vec]
+
+        # 2. Allocate 3D spacetime array of SVectors (M = 1 component)
+        u_tensor = [
+            SVector{1, Float64}(x * y + t) 
+            for x in x_vec, y in y_vec, t in t_vec
+        ]
+
+        params_2d = create_param_dict(:Nx => Nx, :Ny => Ny, :Nt => Nt, :dim => "2+1D")
+
+        # 3. Trigger the 2D space + 1D time constructor
+        sim_2d = create_sim_data(x_grid, y_grid, u_tensor, t_vec, params_2d; time_dim=:t, x_dim=:x, y_dim=:y)
+
+        # 4. Verify types and dimensional invariants (D = 3, DS = 2, M = 1)
+        @test sim_2d isa ESimData{3, 2, 1, Float64}
+        @test sim_2d.domain.dim_keys == (:x, :y, :t)
+        @test sim_2d.domain.time_dim == :t
+        @test size(sim_2d.u) == (Nx, Ny, Nt)
+
+        # Verify axes mapping
+        @test length(sim_2d.axes) == 3
+        @test sim_2d.axes[1] ≈ x_vec
+        @test sim_2d.axes[2] ≈ y_vec
+        @test sim_2d.axes[3] ≈ t_vec
+
+        # Verify initial stats registry and solution assignment
+        @test haskey(sim_2d.stats, :Solution)
+        @test sim_2d.stats[:Solution] === sim_2d.u
+    end
 end
